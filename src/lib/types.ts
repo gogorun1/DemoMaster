@@ -30,7 +30,7 @@ export interface RepoContext {
 }
 
 export interface VideoDbAsset {
-  kind: "video" | "music";
+  kind: "video" | "voice" | "music";
   prompt: string;
   status: "processing" | "done" | "failed" | "error";
   id?: string;

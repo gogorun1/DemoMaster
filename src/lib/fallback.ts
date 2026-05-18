@@ -22,7 +22,7 @@ export function fallbackPitchPlan(
       id: "promise",
       title: "The promise",
       beat: "Turn the repo into a clear outcome, not a feature inventory.",
-      narration: `Paste a repository, and ${productName} finds the pitch angle, proof points, transcript, VideoDB media plan, and voiceover path.`,
+      narration: `Paste a repository, and ${productName} finds the pitch angle, proof points, transcript, VideoDB voice/media plan, and browser preview narration.`,
       onScreenText: "Repo in. Pitch out.",
       visual: "solution" as const,
       duration: 11,

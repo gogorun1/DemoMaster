@@ -15,21 +15,25 @@ export async function generatePitchMediaAssets(plan: PitchPlan): Promise<VideoDb
   }
 
   const logs: AgentLogEntry[] = [
-    { step: "Create media brief", status: "done", message: "Converted pitch scenes into VideoDB video and music prompts." },
+    { step: "Create media brief", status: "done", message: "Converted pitch scenes into VideoDB video, voice, and music prompts." },
   ];
   const scenePrompts = buildVideoPrompts(plan).slice(0, 3);
+  const voicePrompt = `Narrate the following product pitch script in a polished, confident demo presenter voice. Keep it clear, energetic, and natural.\n\n${plan.narration}`;
   const musicPrompt = `Generate modern, premium, optimistic background music for a ${plan.productName} product pitch video. Subtle, cinematic, startup launch energy, no vocals.`;
 
   const jobs = await Promise.allSettled([
     ...scenePrompts.map((prompt) => createVideoJob(apiKey, prompt)),
+    createVoiceJob(apiKey, voicePrompt),
     createMusicJob(apiKey, musicPrompt),
   ]);
 
   const queuedAssets = jobs.map((job, index): VideoDbAsset => {
     if (job.status === "fulfilled") return job.value;
+    const isVideo = index < scenePrompts.length;
+    const isVoice = index === scenePrompts.length;
     return {
-      kind: index < scenePrompts.length ? "video" : "music",
-      prompt: index < scenePrompts.length ? scenePrompts[index] : musicPrompt,
+      kind: isVideo ? "video" : isVoice ? "voice" : "music",
+      prompt: isVideo ? scenePrompts[index] : isVoice ? voicePrompt : musicPrompt,
       status: "error",
       message: job.reason instanceof Error ? job.reason.message : "VideoDB generation failed.",
     };
@@ -40,7 +44,7 @@ export async function generatePitchMediaAssets(plan: PitchPlan): Promise<VideoDb
   logs.push({
     step: "Generate VideoDB assets",
     status: errors === assets.length ? "error" : "done",
-    message: `Started ${assets.filter((asset) => asset.kind === "video" && asset.id).length} video job(s) and ${assets.filter((asset) => asset.kind === "music" && asset.id).length} music job(s).`,
+    message: `Started ${countKind(assets, "video")} video job(s), ${countKind(assets, "voice")} voice job(s), and ${countKind(assets, "music")} music job(s).`,
   });
   logs.push({
     step: "Resolve generated assets",
@@ -58,10 +62,10 @@ export async function generatePitchMediaAssets(plan: PitchPlan): Promise<VideoDb
     logs,
     message:
       streamUrl
-        ? "VideoDB generated assets and compiled them into a timeline stream."
+        ? "VideoDB generated clips, voice, and music, then compiled them into a timeline stream."
         : errors === assets.length
         ? "VideoDB media generation did not start."
-        : "VideoDB started generated video and background music jobs from the repo pitch plan.",
+        : "VideoDB started generated video, voice, and music jobs from the repo pitch plan.",
   };
 }
 
@@ -95,7 +99,7 @@ export async function finalizeVideoDbMedia(queuedAssets: VideoDbAsset[]): Promis
     streamUrl,
     logs,
     message: streamUrl
-      ? "VideoDB compiled the generated clips and music into a final timeline stream."
+      ? "VideoDB compiled the generated clips, voice, and music into a final timeline stream."
       : "VideoDB assets are still processing; finalize again in a moment.",
   };
 }
@@ -133,6 +137,21 @@ async function createMusicJob(apiKey: string, prompt: string): Promise<VideoDbAs
 
   return {
     kind: "music",
+    prompt,
+    status: response.status ?? "processing",
+    id: response.data?.id,
+    outputUrl: response.data?.output_url,
+  };
+}
+
+async function createVoiceJob(apiKey: string, prompt: string): Promise<VideoDbAsset> {
+  const response = await videoDbFetch(apiKey, "/collection/default/generate/audio/", {
+    prompt,
+    audio_type: "speech",
+  });
+
+  return {
+    kind: "voice",
     prompt,
     status: response.status ?? "processing",
     id: response.data?.id,
@@ -179,6 +198,7 @@ async function resolveAsyncAsset(apiKey: string, asset: VideoDbAsset): Promise<V
 
 async function composeTimeline(apiKey: string, assets: VideoDbAsset[], logs: AgentLogEntry[]) {
   const videoAssets = assets.filter((asset) => asset.kind === "video" && asset.id?.startsWith("m-"));
+  const voiceAsset = assets.find((asset) => asset.kind === "voice" && asset.id?.startsWith("a-"));
   const musicAsset = assets.find((asset) => asset.kind === "music" && asset.id?.startsWith("a-"));
 
   if (!videoAssets.length) {
@@ -195,6 +215,10 @@ async function composeTimeline(apiKey: string, assets: VideoDbAsset[], logs: Age
       timeline.addInline(new VideoAsset(asset.id, { start: 0, end: 5, volume: 1 }));
     }
 
+    if (voiceAsset?.id) {
+      timeline.addOverlay(0, new AudioAsset(voiceAsset.id, { start: 0, end: videoAssets.length * 5, volume: 1 }));
+    }
+
     if (musicAsset?.id) {
       timeline.addOverlay(0, new AudioAsset(musicAsset.id, { start: 0, end: videoAssets.length * 5, volume: 0.22 }));
     }
@@ -203,9 +227,12 @@ async function composeTimeline(apiKey: string, assets: VideoDbAsset[], logs: Age
     logs.push({
       step: "Compile VideoDB timeline",
       status: "done",
-      message: musicAsset?.id
-        ? "Arranged generated clips sequentially and overlaid generated music at low volume."
-        : "Arranged generated clips sequentially; music was not available.",
+      message:
+        voiceAsset?.id && musicAsset?.id
+          ? "Arranged generated clips sequentially, overlaid VideoDB voice narration, and mixed generated music at low volume."
+          : voiceAsset?.id
+            ? "Arranged generated clips sequentially and overlaid VideoDB voice narration; music was not available."
+            : "Arranged generated clips sequentially; VideoDB voice is still processing.",
     });
     return typeof streamUrl === "string" ? streamUrl : undefined;
   } catch (error) {
@@ -259,4 +286,8 @@ interface VideoDbAsyncResponse {
 
 function delay(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function countKind(assets: VideoDbAsset[], kind: VideoDbAsset["kind"]) {
+  return assets.filter((asset) => asset.kind === kind && asset.outputUrl).length;
 }
