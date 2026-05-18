@@ -29,24 +29,6 @@ export interface RepoContext {
   warnings: string[];
 }
 
-export interface VideoMoment {
-  query: string;
-  start: number;
-  end: number;
-  label: string;
-  text: string;
-  confidence?: number;
-}
-
-export interface VideoEvidence {
-  status: "ready" | "skipped" | "error";
-  provider: "videodb";
-  videoId?: string;
-  streamUrl?: string;
-  moments: VideoMoment[];
-  message: string;
-}
-
 export interface VideoDbAsset {
   kind: "video" | "music";
   prompt: string;
@@ -87,7 +69,6 @@ export interface PitchScene {
   visual: VisualMode;
   duration: number;
   start: number;
-  evidenceQuery?: string;
 }
 
 export interface PitchPlan {
@@ -102,7 +83,6 @@ export interface PitchPlan {
   insights: string[];
   scenes: PitchScene[];
   narration: string;
-  videoEvidence: VideoEvidence;
   videoDbMedia?: VideoDbMedia;
   generatedAt: string;
 }
