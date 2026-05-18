@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { generatePitchPlan, generateVoiceover } from "@/lib/gemini";
+import { generatePitchPlan, generatePreviewNarration } from "@/lib/gemini";
 import { loadRepoContext } from "@/lib/repo-context";
 import { generatePitchMediaAssets } from "@/lib/videodb";
 import type { AgentLog, PitchRequest, RepoContext } from "@/lib/types";
@@ -15,7 +15,7 @@ export async function POST(request: Request) {
     const pitch = await generatePitchPlan(input, repo);
     const videoDbMedia = await generatePitchMediaAssets(pitch);
     const pitchWithMedia = { ...pitch, videoDbMedia };
-    const audio = await generateVoiceover(pitchWithMedia, input.includeVoice);
+    const audio = await generatePreviewNarration(pitchWithMedia, input.includeVoice);
     const warnings = [
       ...repo.warnings,
       videoDbMedia.status === "error" ? videoDbMedia.message : "",
@@ -37,7 +37,7 @@ export async function POST(request: Request) {
             message: `Created ${pitch.scenes.length} timed scene(s), transcript, and positioning for ${pitch.productName}.`,
           },
           {
-            step: "Generate voiceover",
+            step: "Generate browser preview narration",
             status: audio.status === "ready" ? "done" : audio.status,
             message: audio.message,
           },

@@ -72,12 +72,12 @@ async function generateStructuredJson(client: GoogleGenAI, prompt: string) {
   }
 }
 
-export async function generateVoiceover(plan: PitchPlan, includeVoice: boolean): Promise<AudioResult> {
+export async function generatePreviewNarration(plan: PitchPlan, includeVoice: boolean): Promise<AudioResult> {
   if (!includeVoice) {
     return {
       status: "skipped",
       provider: "gemini",
-      message: "Voiceover generation was disabled.",
+      message: "Browser preview narration was disabled.",
     };
   }
 
@@ -86,7 +86,7 @@ export async function generateVoiceover(plan: PitchPlan, includeVoice: boolean):
     return {
       status: "skipped",
       provider: "gemini",
-      message: "GEMINI_API_KEY is not configured.",
+      message: "GEMINI_API_KEY is not configured for immediate browser preview narration.",
     };
   }
 
@@ -123,13 +123,13 @@ export async function generateVoiceover(plan: PitchPlan, includeVoice: boolean):
       dataUrl: `data:audio/wav;base64,${wav.toString("base64")}`,
       mimeType: "audio/wav",
       voice,
-      message: "Gemini TTS generated the voiceover.",
+      message: "Generated immediate browser preview narration.",
     };
   } catch (error) {
     return {
       status: "error",
       provider: "gemini",
-      message: error instanceof Error ? error.message : "Gemini TTS failed.",
+      message: error instanceof Error ? error.message : "Browser preview narration failed.",
     };
   }
 }

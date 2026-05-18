@@ -253,13 +253,13 @@ export function PitchWorkbench() {
               </label>
 
               <label className="field">
-                <span>Voice</span>
+                <span>Preview audio</span>
                 <select
                   value={form.includeVoice ? "yes" : "no"}
                   onChange={(event) => setForm({ ...form, includeVoice: event.target.value === "yes" })}
                 >
-                  <option value="yes">Gemini TTS</option>
-                  <option value="no">No voice</option>
+                  <option value="yes">On</option>
+                  <option value="no">Silent preview</option>
                 </select>
               </label>
             </div>
@@ -394,7 +394,7 @@ export function PitchWorkbench() {
                   ) : (
                     <li className="evidence-item">
                       <h3>skipped</h3>
-                      <p>Set VIDEODB_API_KEY to generate supporting video clips and music from the repo pitch.</p>
+                      <p>Set VIDEODB_API_KEY to generate supporting video clips, voice narration, music, and a final timeline stream from the repo pitch.</p>
                     </li>
                   )}
                 </ul>

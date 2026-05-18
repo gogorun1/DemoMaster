@@ -5,8 +5,8 @@ DemoMaster turns a demo repository into a narrated product pitch video plan and 
 It combines:
 
 - Gemini structured output for repo understanding, positioning, scriptwriting, and pitch strategy.
-- Gemini TTS for voiceover audio.
-- VideoDB generated media jobs for supporting pitch video clips and background music from the repo-derived story.
+- Immediate browser preview narration for local playback and WebM export.
+- VideoDB generated media jobs for supporting pitch video clips, voice narration, background music, and final timeline stream compilation from the repo-derived story.
 - A browser canvas renderer that previews and exports a narrated WebM pitch video.
 
 ## Getting Started
@@ -36,7 +36,7 @@ GITHUB_TOKEN=...
 1. Paste a GitHub repository URL.
 2. Generate a pitch package.
 3. Review the transcript, scene plan, and VideoDB-generated media jobs.
-4. Preview the timeline, play the voiceover, and export a narrated WebM.
+4. Preview the timeline, play the browser narration, export a WebM, or finalize the VideoDB stream when generated assets are ready.
 
 ## Notes
 
