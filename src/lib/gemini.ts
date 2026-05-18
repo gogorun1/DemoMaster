@@ -1,25 +1,24 @@
 import { GoogleGenAI } from "@google/genai";
 import { fallbackPitchPlan } from "@/lib/fallback";
-import type { AudioResult, PitchPlan, PitchRequest, RepoContext, VideoEvidence } from "@/lib/types";
+import type { AudioResult, PitchPlan, PitchRequest, RepoContext } from "@/lib/types";
 
 let geminiClient: GoogleGenAI | null = null;
 
 export async function generatePitchPlan(
   request: PitchRequest,
   repo: RepoContext,
-  videoEvidence: VideoEvidence,
 ): Promise<PitchPlan> {
   const client = getGeminiClient();
-  if (!client) return fallbackPitchPlan(request, repo, videoEvidence);
+  if (!client) return fallbackPitchPlan(request, repo);
 
   try {
-    const prompt = buildPitchPrompt(request, repo, videoEvidence);
+    const prompt = buildPitchPrompt(request, repo);
     const response = await generateStructuredJson(client, prompt);
     const parsed = parseGeminiJson(response.text ?? "{}") as Partial<PitchPlan>;
-    return normalizePitchPlan(parsed, request, repo, videoEvidence);
+    return normalizePitchPlan(parsed, request, repo);
   } catch (error) {
     console.warn("Gemini pitch generation failed:", error instanceof Error ? error.message : error);
-    return fallbackPitchPlan(request, repo, videoEvidence);
+    return fallbackPitchPlan(request, repo);
   }
 }
 
@@ -144,7 +143,7 @@ function getGeminiClient() {
   return geminiClient;
 }
 
-function buildPitchPrompt(request: PitchRequest, repo: RepoContext, videoEvidence: VideoEvidence) {
+function buildPitchPrompt(request: PitchRequest, repo: RepoContext) {
   const files = repo.files
     .map((file) => `### ${file.path}\n${file.content}`)
     .join("\n\n")
@@ -190,9 +189,8 @@ function normalizePitchPlan(
   parsed: Partial<PitchPlan>,
   request: PitchRequest,
   repo: RepoContext,
-  videoEvidence: VideoEvidence,
 ): PitchPlan {
-  const fallback = fallbackPitchPlan(request, repo, videoEvidence);
+  const fallback = fallbackPitchPlan(request, repo);
   const parsedRecord = parsed as Record<string, unknown>;
   const rawScenes = Array.isArray(parsed.scenes) && parsed.scenes.length ? parsed.scenes : fallback.scenes;
   let cursor = 0;
@@ -218,8 +216,6 @@ function normalizePitchPlan(
         "workflow",
       duration,
       start: cursor,
-      evidenceQuery:
-        pickString(sceneRecord, ["evidenceQuery", "evidence_query"]) || fallback.scenes[index]?.evidenceQuery,
     };
     cursor += duration;
     return normalized;
@@ -260,7 +256,6 @@ function normalizePitchPlan(
         : fallback.insights,
     scenes,
     narration,
-    videoEvidence,
     generatedAt: new Date().toISOString(),
   };
 }
@@ -353,7 +348,6 @@ const pitchSchema = {
           visual: { type: "string", enum: ["talkingHead", "problem", "solution", "workflow", "proof", "cta"] },
           duration: { type: "integer", minimum: 7, maximum: 18 },
           start: { type: "integer" },
-          evidenceQuery: { type: "string" },
         },
         required: ["id", "title", "beat", "narration", "onScreenText", "visual", "duration"],
       },

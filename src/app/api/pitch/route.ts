@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { generatePitchPlan, generateVoiceover } from "@/lib/gemini";
 import { loadRepoContext } from "@/lib/repo-context";
 import { generatePitchMediaAssets } from "@/lib/videodb";
-import type { AgentLog, PitchRequest, RepoContext, VideoEvidence } from "@/lib/types";
+import type { AgentLog, PitchRequest, RepoContext } from "@/lib/types";
 
 export const runtime = "nodejs";
 export const maxDuration = 120;
@@ -12,8 +12,7 @@ export async function POST(request: Request) {
     const payload = (await request.json()) as Partial<PitchRequest>;
     const input = sanitizeRequest(payload);
     const repo = await loadRepoContext(input.repoUrl);
-    const videoEvidence = repoOnlyVideoEvidence();
-    const pitch = await generatePitchPlan(input, repo, videoEvidence);
+    const pitch = await generatePitchPlan(input, repo);
     const videoDbMedia = await generatePitchMediaAssets(pitch);
     const pitchWithMedia = { ...pitch, videoDbMedia };
     const audio = await generateVoiceover(pitchWithMedia, input.includeVoice);
@@ -77,14 +76,5 @@ function sanitizeRequest(payload: Partial<PitchRequest>): PitchRequest {
     audience: payload.audience?.trim() || "founders, judges, and product buyers",
     style: payload.style || "launch",
     includeVoice: payload.includeVoice ?? true,
-  };
-}
-
-function repoOnlyVideoEvidence(): VideoEvidence {
-  return {
-    status: "skipped",
-    provider: "videodb",
-    moments: [],
-    message: "Repo-only pitch generation mode.",
   };
 }
