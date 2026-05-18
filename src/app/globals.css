@@ -1,0 +1,474 @@
+:root {
+  --bg: #080908;
+  --panel: #111412;
+  --panel-2: #171b18;
+  --panel-3: #20251f;
+  --line: #2d342e;
+  --line-strong: #465144;
+  --text: #f1f3ed;
+  --muted: #aab3a8;
+  --soft: #d9dfd4;
+  --green: #83d17d;
+  --mint: #7ed6bf;
+  --amber: #f2c36b;
+  --rose: #ed8796;
+  --ink: #080908;
+  --shadow: 0 24px 80px rgba(0, 0, 0, 0.34);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html {
+  background: var(--bg);
+  color: var(--text);
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  background:
+    linear-gradient(180deg, rgba(131, 209, 125, 0.07), transparent 260px),
+    radial-gradient(circle at 18% 0%, rgba(126, 214, 191, 0.08), transparent 32%),
+    var(--bg);
+  color: var(--text);
+  font-family: "Geist", "Geist Fallback", ui-sans-serif, system-ui, sans-serif;
+}
+
+button,
+input,
+textarea,
+select {
+  font: inherit;
+}
+
+button {
+  cursor: pointer;
+}
+
+button:disabled {
+  cursor: not-allowed;
+}
+
+a {
+  color: inherit;
+}
+
+.app-shell {
+  min-height: 100vh;
+  padding: 28px;
+}
+
+.workspace {
+  display: grid;
+  grid-template-columns: minmax(340px, 430px) minmax(0, 1fr);
+  gap: 20px;
+  max-width: 1480px;
+  margin: 0 auto;
+}
+
+.sidebar,
+.stage,
+.panel,
+.timeline-panel {
+  border: 1px solid var(--line);
+  background: rgba(17, 20, 18, 0.9);
+  box-shadow: var(--shadow);
+}
+
+.sidebar {
+  border-radius: 8px;
+  overflow: hidden;
+  align-self: start;
+}
+
+.brand-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  border-bottom: 1px solid var(--line);
+  padding: 18px;
+  background: rgba(32, 37, 31, 0.72);
+}
+
+.brand-title {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+}
+
+.mark {
+  display: grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  border-radius: 8px;
+  background: var(--green);
+  color: var(--ink);
+}
+
+.brand-title h1,
+.panel-title h2,
+.output-heading h2 {
+  margin: 0;
+  letter-spacing: 0;
+}
+
+.brand-title h1 {
+  font-size: 18px;
+  line-height: 1.1;
+}
+
+.brand-title p {
+  margin: 4px 0 0;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.status-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 28px;
+  padding: 0 10px;
+  border: 1px solid var(--line-strong);
+  border-radius: 999px;
+  color: var(--soft);
+  background: rgba(8, 9, 8, 0.4);
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.status-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 999px;
+  background: var(--green);
+}
+
+.form {
+  display: grid;
+  gap: 16px;
+  padding: 18px;
+}
+
+.field {
+  display: grid;
+  gap: 8px;
+}
+
+.field span,
+.field-row label span {
+  color: var(--soft);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.field input,
+.field textarea,
+.field select {
+  width: 100%;
+  min-height: 44px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: #0b0d0b;
+  color: var(--text);
+  padding: 11px 12px;
+  outline: none;
+}
+
+.field textarea {
+  min-height: 92px;
+  resize: vertical;
+}
+
+.field input:focus,
+.field textarea:focus,
+.field select:focus {
+  border-color: var(--green);
+  box-shadow: 0 0 0 3px rgba(131, 209, 125, 0.12);
+}
+
+.field-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+
+.button-row {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 42px;
+  border: 1px solid var(--line-strong);
+  border-radius: 7px;
+  background: var(--panel-3);
+  color: var(--text);
+  padding: 0 14px;
+  font-weight: 650;
+}
+
+.btn.primary {
+  border-color: rgba(131, 209, 125, 0.72);
+  background: var(--green);
+  color: var(--ink);
+}
+
+.btn.ghost {
+  background: transparent;
+}
+
+.btn:disabled {
+  opacity: 0.55;
+}
+
+.spin {
+  animation: spin 0.9s linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.notice {
+  border: 1px solid rgba(242, 195, 107, 0.4);
+  border-radius: 7px;
+  background: rgba(242, 195, 107, 0.08);
+  color: #f5d999;
+  padding: 11px 12px;
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.main {
+  display: grid;
+  gap: 20px;
+  min-width: 0;
+}
+
+.stage {
+  border-radius: 8px;
+  padding: 18px;
+}
+
+.canvas-wrap {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #050605;
+}
+
+.canvas-wrap canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+.stage-controls {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding-top: 14px;
+}
+
+.scrubber {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: 1;
+  min-width: 0;
+}
+
+.scrubber input {
+  width: 100%;
+  accent-color: var(--green);
+}
+
+.timecode {
+  color: var(--muted);
+  font-family: "Geist Mono", "Geist Mono Fallback", ui-monospace, monospace;
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.output-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.1fr) minmax(300px, 0.9fr);
+  gap: 20px;
+}
+
+.panel,
+.timeline-panel {
+  border-radius: 8px;
+  padding: 18px;
+}
+
+.panel-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 14px;
+}
+
+.panel-title h2,
+.output-heading h2 {
+  font-size: 16px;
+}
+
+.panel-title p,
+.output-heading p {
+  margin: 5px 0 0;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.score {
+  display: grid;
+  place-items: center;
+  width: 54px;
+  height: 54px;
+  border-radius: 8px;
+  border: 1px solid rgba(131, 209, 125, 0.42);
+  background: rgba(131, 209, 125, 0.09);
+  color: var(--green);
+  font-family: "Geist Mono", "Geist Mono Fallback", ui-monospace, monospace;
+  font-size: 18px;
+  font-weight: 700;
+}
+
+.insight-list,
+.scene-list,
+.evidence-list {
+  display: grid;
+  gap: 10px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.insight-list li,
+.scene-item,
+.evidence-item {
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: rgba(8, 9, 8, 0.35);
+  padding: 12px;
+}
+
+.scene-item {
+  display: grid;
+  grid-template-columns: 58px 1fr;
+  gap: 12px;
+}
+
+.scene-time {
+  color: var(--green);
+  font-family: "Geist Mono", "Geist Mono Fallback", ui-monospace, monospace;
+  font-size: 12px;
+}
+
+.scene-item h3,
+.evidence-item h3 {
+  margin: 0 0 5px;
+  font-size: 14px;
+}
+
+.scene-item p,
+.evidence-item p,
+.insight-list li {
+  margin: 0;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.empty-state {
+  display: grid;
+  place-items: center;
+  min-height: 520px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background:
+    linear-gradient(120deg, rgba(126, 214, 191, 0.08), transparent 38%),
+    rgba(17, 20, 18, 0.74);
+  text-align: center;
+  padding: 28px;
+}
+
+.empty-state h2 {
+  margin: 14px 0 8px;
+  font-size: clamp(28px, 5vw, 64px);
+  line-height: 0.95;
+  letter-spacing: 0;
+}
+
+.empty-state p {
+  max-width: 620px;
+  margin: 0 auto;
+  color: var(--muted);
+  line-height: 1.55;
+}
+
+.export-link {
+  color: var(--green);
+  font-size: 13px;
+  font-weight: 650;
+}
+
+@media (max-width: 1100px) {
+  .workspace,
+  .output-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .sidebar {
+    position: static;
+  }
+}
+
+@media (max-width: 680px) {
+  .app-shell {
+    padding: 14px;
+  }
+
+  .brand-bar,
+  .stage-controls,
+  .button-row,
+  .panel-title {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .field-row {
+    grid-template-columns: 1fr;
+  }
+
+  .stage-controls {
+    gap: 12px;
+  }
+
+  .scrubber {
+    width: 100%;
+  }
+
+  .scene-item {
+    grid-template-columns: 1fr;
+  }
+}
