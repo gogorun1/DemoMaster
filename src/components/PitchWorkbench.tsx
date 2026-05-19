@@ -3,9 +3,11 @@
 import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import {
   Brain,
+  Camera,
   CheckCircle2,
   Code2,
   Download,
+  ExternalLink,
   FileText,
   Loader2,
   Mic2,
@@ -13,11 +15,12 @@ import {
   Play,
   RefreshCcw,
   Sparkles,
+  Trash2,
   Trophy,
 } from "lucide-react";
 import { VideoCanvas } from "@/components/VideoCanvas";
 import { drawPitchFrame, getTotalDuration } from "@/lib/render-frame";
-import type { AgentLogEntry, PitchResponse } from "@/lib/types";
+import type { AgentLog, AgentLogEntry, DemoCaptureResult, PitchResponse } from "@/lib/types";
 
 const sampleRepo = "https://github.com/vercel/ai-chatbot";
 
@@ -28,6 +31,8 @@ export function PitchWorkbench() {
   const [isGenerating, setIsGenerating] = useState(false);
   const [isPlaying, setIsPlaying] = useState(false);
   const [isExporting, setIsExporting] = useState(false);
+  const [isStartingCapture, setIsStartingCapture] = useState(false);
+  const [isDestroyingCapture, setIsDestroyingCapture] = useState(false);
   const [error, setError] = useState("");
   const [exportUrl, setExportUrl] = useState("");
   const audioRef = useRef<HTMLAudioElement>(null);
@@ -57,6 +62,22 @@ export function PitchWorkbench() {
     return () => cancelAnimationFrame(frame);
   }, [currentTime, isPlaying, result, totalDuration]);
 
+  useEffect(() => {
+    const instanceId = result?.capture?.instanceId;
+    const shouldPoll = result?.capture?.status === "running";
+    if (!instanceId || !shouldPoll) return;
+
+    const timer = window.setInterval(() => {
+      refreshCapture(instanceId).catch((refreshError) => {
+        setError(refreshError instanceof Error ? refreshError.message : "Capture status failed.");
+      });
+    }, 12000);
+
+    return () => window.clearInterval(timer);
+    // refreshCapture reads the latest result state and is intentionally not a stable polling dependency.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [result?.capture?.instanceId, result?.capture?.status]);
+
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setIsGenerating(true);
@@ -79,6 +100,70 @@ export function PitchWorkbench() {
     } finally {
       setIsGenerating(false);
     }
+  }
+
+  async function startVultrCapture() {
+    if (!result) return;
+    setIsStartingCapture(true);
+    setError("");
+    try {
+      const response = await fetch("/api/vultr/start", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ repoUrl, capturePlan: result.pitch.capturePlan }),
+      });
+      const body = (await response.json()) as { capture?: DemoCaptureResult; agentLog?: AgentLog; error?: string };
+      if (!response.ok) throw new Error(body.error || "Could not start Vultr runner.");
+      updateCapture(body.capture, body.agentLog);
+    } catch (captureError) {
+      setError(captureError instanceof Error ? captureError.message : "Could not start Vultr runner.");
+    } finally {
+      setIsStartingCapture(false);
+    }
+  }
+
+  async function refreshCapture(instanceId = result?.capture?.instanceId) {
+    if (!result || !instanceId) return;
+    const response = await fetch("/api/vultr/status", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ instanceId, port: result.pitch.capturePlan.port }),
+    });
+    const body = (await response.json()) as { capture?: DemoCaptureResult; agentLog?: AgentLog; error?: string };
+    if (!response.ok) throw new Error(body.error || "Could not read Vultr runner status.");
+    updateCapture(body.capture, body.agentLog);
+  }
+
+  async function destroyCapture() {
+    if (!result?.capture?.instanceId) return;
+    setIsDestroyingCapture(true);
+    setError("");
+    try {
+      const response = await fetch("/api/vultr/destroy", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ instanceId: result.capture.instanceId }),
+      });
+      const body = (await response.json()) as { capture?: DemoCaptureResult; agentLog?: AgentLog; error?: string };
+      if (!response.ok) throw new Error(body.error || "Could not destroy Vultr runner.");
+      updateCapture(body.capture, body.agentLog);
+    } catch (destroyError) {
+      setError(destroyError instanceof Error ? destroyError.message : "Could not destroy Vultr runner.");
+    } finally {
+      setIsDestroyingCapture(false);
+    }
+  }
+
+  function updateCapture(capture?: DemoCaptureResult, agentLog?: AgentLog) {
+    if (!capture) return;
+    setResult((current) => {
+      if (!current) return current;
+      return {
+        ...current,
+        capture,
+        agentLogs: agentLog ? upsertAgentLog(current.agentLogs, agentLog) : current.agentLogs,
+      };
+    });
   }
 
   async function togglePlayback() {
@@ -143,7 +228,8 @@ export function PitchWorkbench() {
 
       recorder.start();
       source?.start();
-      await drawExportFrames(context, result, totalDuration);
+      const captureImage = await loadCaptureImage(result.capture?.screenshotUrl);
+      await drawExportFrames(context, result, totalDuration, captureImage);
       source?.stop();
       recorder.stop();
 
@@ -211,7 +297,7 @@ export function PitchWorkbench() {
             </div>
             {isGenerating ? (
               <ul className="run-list">
-                {["Inspect repo", "Design product flow", "Write pitch", "Judge quality", "Render voice"].map((step) => (
+                {["Inspect repo", "Design product flow", "Write pitch", "Plan capture", "Judge quality", "Render voice"].map((step) => (
                   <li key={step}>
                     <Loader2 size={14} className="spin" />
                     <span>{step}</span>
@@ -270,7 +356,7 @@ export function PitchWorkbench() {
                 </div>
 
                 <div className="canvas-wrap">
-                  <VideoCanvas plan={result.pitch} currentTime={currentTime} />
+                  <VideoCanvas plan={result.pitch} currentTime={currentTime} capture={result.capture} />
                 </div>
 
                 <div className="stage-controls">
@@ -304,6 +390,87 @@ export function PitchWorkbench() {
                     Download exported video
                   </a>
                 ) : null}
+              </section>
+
+              <section className="panel">
+                <div className="panel-heading">
+                  <Camera size={18} />
+                  <h2>Demo capture</h2>
+                </div>
+                <div className="capture-layout">
+                  <div className="capture-copy">
+                    <p>{result.pitch.capturePlan.message}</p>
+                    <dl>
+                      <div>
+                        <dt>Install</dt>
+                        <dd>{result.pitch.capturePlan.installCommand}</dd>
+                      </div>
+                      <div>
+                        <dt>Run</dt>
+                        <dd>{result.pitch.capturePlan.runCommand}</dd>
+                      </div>
+                      <div>
+                        <dt>Port</dt>
+                        <dd>{result.pitch.capturePlan.port}</dd>
+                      </div>
+                    </dl>
+                    <div className="button-row">
+                      <button className="btn primary" type="button" onClick={startVultrCapture} disabled={isStartingCapture || result.capture?.status === "running"}>
+                        {isStartingCapture ? <Loader2 size={17} className="spin" /> : <Camera size={17} />}
+                        Start Vultr runner
+                      </button>
+                      {result.capture?.instanceId ? (
+                        <button className="btn" type="button" onClick={() => refreshCapture()} disabled={result.capture?.status === "destroyed"}>
+                          <RefreshCcw size={17} />
+                          Refresh
+                        </button>
+                      ) : null}
+                      {result.capture?.instanceId && result.capture.status !== "destroyed" ? (
+                        <button className="btn danger" type="button" onClick={destroyCapture} disabled={isDestroyingCapture}>
+                          {isDestroyingCapture ? <Loader2 size={17} className="spin" /> : <Trash2 size={17} />}
+                          Destroy VM
+                        </button>
+                      ) : null}
+                    </div>
+                    {result.capture ? (
+                      <div className="capture-status">
+                        <span className={`small-status ${captureStatusClass(result.capture.status)}`}>{result.capture.status}</span>
+                        <p>{result.capture.message}</p>
+                      </div>
+                    ) : null}
+                  </div>
+                  <div className="capture-preview">
+                    {result.capture?.screenshotUrl ? (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img src={result.capture.screenshotUrl} alt="Captured product running on Vultr" />
+                    ) : (
+                      <div className="capture-empty">
+                        <Camera size={28} />
+                        <span>Vultr runner will attach real product footage here.</span>
+                      </div>
+                    )}
+                    <div className="capture-links">
+                      {result.capture?.targetUrl ? (
+                        <a href={result.capture.targetUrl} target="_blank" rel="noreferrer">
+                          <ExternalLink size={14} />
+                          Open app
+                        </a>
+                      ) : null}
+                      {result.capture?.statusUrl ? (
+                        <a href={result.capture.statusUrl} target="_blank" rel="noreferrer">
+                          <ExternalLink size={14} />
+                          Status
+                        </a>
+                      ) : null}
+                      {result.capture?.videoUrl ? (
+                        <a href={result.capture.videoUrl} target="_blank" rel="noreferrer">
+                          <ExternalLink size={14} />
+                          Capture video
+                        </a>
+                      ) : null}
+                    </div>
+                  </div>
+                </div>
               </section>
 
               <section className="output-grid">
@@ -426,12 +593,45 @@ function LogEntry({ entry }: { entry: AgentLogEntry }) {
   );
 }
 
-async function drawExportFrames(context: CanvasRenderingContext2D, result: PitchResponse, duration: number) {
+function upsertAgentLog(logs: AgentLog[], nextLog: AgentLog) {
+  const exists = logs.some((log) => log.agent === nextLog.agent);
+  return exists ? logs.map((log) => (log.agent === nextLog.agent ? nextLog : log)) : [...logs, nextLog];
+}
+
+function captureStatusClass(status: DemoCaptureResult["status"]) {
+  if (status === "ready") return "ready";
+  if (status === "error") return "error";
+  if (status === "running") return "running";
+  return "optional";
+}
+
+async function loadCaptureImage(url?: string) {
+  if (!url) return undefined;
+  try {
+    const image = new Image();
+    image.crossOrigin = "anonymous";
+    await new Promise<void>((resolve, reject) => {
+      image.onload = () => resolve();
+      image.onerror = () => reject(new Error("Could not load capture image."));
+      image.src = url;
+    });
+    return image;
+  } catch {
+    return undefined;
+  }
+}
+
+async function drawExportFrames(
+  context: CanvasRenderingContext2D,
+  result: PitchResponse,
+  duration: number,
+  captureImage?: CanvasImageSource,
+) {
   const startedAt = performance.now();
   await new Promise<void>((resolve) => {
     const draw = (now: number) => {
       const elapsed = Math.min(duration, (now - startedAt) / 1000);
-      drawPitchFrame(context, result.pitch, elapsed);
+      drawPitchFrame(context, result.pitch, elapsed, captureImage);
       if (elapsed >= duration) resolve();
       else requestAnimationFrame(draw);
     };

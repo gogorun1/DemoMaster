@@ -228,6 +228,11 @@ a {
   color: #ffffff;
 }
 
+.btn.danger {
+  border-color: rgba(220, 38, 38, 0.35);
+  color: #b91c1c;
+}
+
 .icon-btn {
   width: 42px;
   padding: 0;
@@ -424,7 +429,10 @@ a {
 .agent-panel p,
 .transcript,
 .stack-list p,
-.stack-list small {
+.stack-list small,
+.capture-copy p,
+.capture-copy dd,
+.capture-status p {
   margin: 0;
   color: var(--muted);
   font-size: 13px;
@@ -505,6 +513,18 @@ a {
   color: #047857;
 }
 
+.small-status.running,
+.log-status.running {
+  background: #eff6ff;
+  color: #1d4ed8;
+}
+
+.small-status.error,
+.log-status.error {
+  background: #fef2f2;
+  color: #b91c1c;
+}
+
 .small-status.optional,
 .small-status.skipped,
 .log-status.skipped {
@@ -512,20 +532,95 @@ a {
   color: var(--muted);
 }
 
-.log-status.error {
-  background: #fef2f2;
-  color: #b91c1c;
-}
-
-.log-status.running {
-  background: #eff6ff;
-  color: #1d4ed8;
-}
-
 .agent-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 12px;
+}
+
+.capture-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 0.9fr) minmax(320px, 1.1fr);
+  gap: 16px;
+  align-items: start;
+}
+
+.capture-copy {
+  display: grid;
+  gap: 12px;
+}
+
+.capture-copy dl {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+}
+
+.capture-copy dl div {
+  display: grid;
+  grid-template-columns: 72px minmax(0, 1fr);
+  gap: 10px;
+  border-top: 1px solid var(--line);
+  padding-top: 8px;
+}
+
+.capture-copy dt {
+  color: var(--ink);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.capture-copy dd {
+  margin: 0;
+}
+
+.capture-status {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface-2);
+  padding: 10px;
+}
+
+.capture-preview {
+  display: grid;
+  gap: 10px;
+}
+
+.capture-preview img,
+.capture-empty {
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #eef2f7;
+  object-fit: cover;
+}
+
+.capture-empty {
+  display: grid;
+  place-items: center;
+  color: var(--muted);
+  text-align: center;
+  padding: 22px;
+}
+
+.capture-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.capture-links a {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--blue);
+  font-size: 13px;
+  font-weight: 750;
+  text-decoration: none;
 }
 
 .agent-panel {
@@ -599,7 +694,8 @@ a {
 @media (max-width: 1120px) {
   .workspace,
   .output-grid,
-  .agent-grid {
+  .agent-grid,
+  .capture-layout {
     grid-template-columns: 1fr;
   }
 }
