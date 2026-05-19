@@ -14,9 +14,15 @@ export function VideoCanvas({ plan, currentTime, capture }: VideoCanvasProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const captureMediaRef = useRef<HTMLImageElement | HTMLVideoElement | null>(null);
   const playbackStateRef = useRef({ active: false, lastTime: 0 });
+  const latestFrameRef = useRef({ plan, currentTime });
+
+  useEffect(() => {
+    latestFrameRef.current = { plan, currentTime };
+  }, [currentTime, plan]);
 
   useEffect(() => {
     captureMediaRef.current = null;
+    playbackStateRef.current = { active: false, lastTime: 0 };
     let cancelled = false;
 
     if (capture?.videoUrl) {
@@ -31,7 +37,8 @@ export function VideoCanvas({ plan, currentTime, capture }: VideoCanvasProps) {
         captureMediaRef.current = video;
         const canvas = canvasRef.current;
         const context = canvas?.getContext("2d");
-        if (canvas && context) drawPitchFrame(context, plan, currentTime, video);
+        const frame = latestFrameRef.current;
+        if (canvas && context) drawPitchFrame(context, frame.plan, frame.currentTime, drawableMedia(video));
       };
       video.src = capture.videoUrl;
       return () => {
@@ -48,21 +55,22 @@ export function VideoCanvas({ plan, currentTime, capture }: VideoCanvasProps) {
       captureMediaRef.current = image;
       const canvas = canvasRef.current;
       const context = canvas?.getContext("2d");
-      if (canvas && context) drawPitchFrame(context, plan, currentTime, image);
+      const frame = latestFrameRef.current;
+      if (canvas && context) drawPitchFrame(context, frame.plan, frame.currentTime, image);
     };
     image.src = capture.screenshotUrl;
     return () => {
       cancelled = true;
     };
-  }, [capture?.screenshotUrl, capture?.videoUrl, currentTime, plan]);
+  }, [capture?.screenshotUrl, capture?.videoUrl]);
 
   useEffect(() => {
     const canvas = canvasRef.current;
     const context = canvas?.getContext("2d");
     if (!canvas || !context) return;
-    const media = captureMediaRef.current || undefined;
+    const media = drawableMedia(captureMediaRef.current);
     if (media instanceof HTMLVideoElement) syncPreviewVideo(media, plan, currentTime, playbackStateRef.current);
-    drawPitchFrame(context, plan, currentTime, media);
+    drawPitchFrame(context, plan, currentTime, drawableMedia(media));
   }, [currentTime, plan]);
 
   return <canvas ref={canvasRef} width={1280} height={720} aria-label="Generated pitch video preview" />;
@@ -97,4 +105,9 @@ function lastDemoEnd(plan: PitchPlan) {
   const demoScenes = plan.scenes.filter(isDemoScene);
   const last = demoScenes.at(-1);
   return last ? last.start + last.duration : firstDemoStart(plan) + 1;
+}
+
+function drawableMedia(media: HTMLImageElement | HTMLVideoElement | null | undefined) {
+  if (!(media instanceof HTMLVideoElement)) return media || undefined;
+  return media.videoWidth > 0 && media.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA ? media : undefined;
 }
