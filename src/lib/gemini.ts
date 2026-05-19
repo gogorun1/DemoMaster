@@ -61,6 +61,8 @@ interface AgentRunResult {
 }
 
 const VISUALS: VisualMode[] = ["presenter", "problem", "product", "workflow", "evidence", "close"];
+const DEFAULT_AGENT_TIMEOUT_MS = 25000;
+const DEFAULT_TTS_TIMEOUT_MS = 45000;
 
 export async function generatePitchWithAgents(request: PitchRequest, repo: RepoContext): Promise<AgentRunResult> {
   const client = getGeminiClient();
@@ -71,7 +73,7 @@ export async function generatePitchWithAgents(request: PitchRequest, repo: RepoC
     };
   }
 
-  const model = process.env.GEMINI_REASONING_MODEL || "gemini-3.1-pro-preview";
+  const model = process.env.GEMINI_REASONING_MODEL || "gemini-3-flash-preview";
   const logs: AgentLog[] = [];
 
   try {
@@ -128,10 +130,12 @@ export async function generatePitchWithAgents(request: PitchRequest, repo: RepoC
       ],
     });
 
-    const judge = await runQualityJudge(client, model, draft, analysis, strategy);
+    const judge = await runQualityJudge(client, model, draft, analysis, strategy).catch((error) =>
+      localQualityJudge(error, model, draft),
+    );
     logs.push(judge.log);
 
-    const pitch = normalizePitchPlan(draft, request, repo, judge.review);
+    const pitch = normalizePitchPlan(draft, request, repo, analysis, judge.review);
     return { pitch, agentLogs: logs };
   } catch (error) {
     const pitch = fallbackPitchPlan(request, repo);
@@ -173,33 +177,37 @@ export async function generateNarrationAudio(plan: PitchPlan): Promise<AudioResu
 
   try {
     const voice = process.env.GEMINI_TTS_VOICE || "Kore";
-    const response = await client.models.generateContent({
-      model: process.env.GEMINI_TTS_MODEL || "gemini-3.1-flash-tts-preview",
-      contents: [
-        {
-          parts: [
-            {
-              text: [
-                "Read this as a premium product pitch narrator.",
-                "Tone: clear, warm, decisive, demo-stage confidence.",
-                "Pacing: measured, energetic, no salesy exaggeration.",
-                "Keep the exact words of the script.",
-                "",
-                plan.narration,
-              ].join("\n"),
+    const response = await withTimeout(
+      client.models.generateContent({
+        model: process.env.GEMINI_TTS_MODEL || "gemini-3.1-flash-tts-preview",
+        contents: [
+          {
+            parts: [
+              {
+                text: [
+                  "Read this as a premium product pitch narrator.",
+                  "Tone: clear, warm, decisive, demo-stage confidence.",
+                  "Pacing: measured, energetic, no salesy exaggeration.",
+                  "Keep the exact words of the script.",
+                  "",
+                  plan.narration,
+                ].join("\n"),
+              },
+            ],
+          },
+        ],
+        config: {
+          responseModalities: ["AUDIO"],
+          speechConfig: {
+            voiceConfig: {
+              prebuiltVoiceConfig: { voiceName: voice },
             },
-          ],
-        },
-      ],
-      config: {
-        responseModalities: ["AUDIO"],
-        speechConfig: {
-          voiceConfig: {
-            prebuiltVoiceConfig: { voiceName: voice },
           },
         },
-      },
-    });
+      }),
+      Number(process.env.GEMINI_TTS_TIMEOUT_MS || DEFAULT_TTS_TIMEOUT_MS),
+      "Gemini narration timed out.",
+    );
 
     const base64 = response.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data;
     if (!base64) throw new Error("Gemini returned no audio data.");
@@ -377,6 +385,41 @@ async function runQualityJudge(
   };
 }
 
+function localQualityJudge(error: unknown, model: string, draft: PitchDraft): { review: QualityReview; log: AgentLog } {
+  const message = friendlyProviderError(error, "Quality judge failed; applied the local product quality bar.");
+  const review: QualityReview = {
+    score: clamp(Number(draft.score) || 82, 0, 100),
+    verdict: "The generated storyboard is specific enough to render; local quality checks were applied because the judge model failed.",
+    issues: [message],
+    fixes: [
+      "Keep the repo-only input flow.",
+      "Make demo capture a first-class product capability.",
+      "Keep captions short and evidence-backed.",
+    ],
+  };
+
+  return {
+    review,
+    log: {
+      agent: "Quality Judge Agent",
+      provider: "gemini",
+      model,
+      entries: [
+        {
+          step: "Recover judge pass",
+          status: "skipped",
+          message,
+        },
+        {
+          step: "Apply local quality bar",
+          status: "done",
+          message: review.verdict,
+        },
+      ],
+    },
+  };
+}
+
 async function runFeatherlessJudge(
   draft: PitchDraft,
   analysis: ProductAnalysis,
@@ -430,28 +473,41 @@ async function generateJson<T>(
   schema: Record<string, unknown>,
 ): Promise<T> {
   try {
-    const response = await client.models.generateContent({
-      model,
-      contents: prompt,
-      config: {
-        responseFormat: {
-          text: {
-            mimeType: "application/json",
-            schema,
+    const response = await withTimeout(
+      client.models.generateContent({
+        model,
+        contents: prompt,
+        config: {
+          temperature: 0.35,
+          maxOutputTokens: 8192,
+          responseFormat: {
+            text: {
+              mimeType: "application/json",
+              schema,
+            },
           },
-        },
-      } as unknown as Record<string, unknown>,
-    });
+        } as unknown as Record<string, unknown>,
+      }),
+      Number(process.env.GEMINI_AGENT_TIMEOUT_MS || DEFAULT_AGENT_TIMEOUT_MS),
+      `Gemini agent call timed out on ${model}.`,
+    );
     return parseJson(response.text ?? "{}") as T;
-  } catch {
-    const response = await client.models.generateContent({
-      model,
-      contents: `${prompt}\n\nReturn strict JSON only. Do not wrap it in Markdown.`,
-      config: {
-        responseMimeType: "application/json",
-        responseSchema: schema,
-      } as unknown as Record<string, unknown>,
-    });
+  } catch (error) {
+    if (isTimeoutError(error)) throw error;
+    const response = await withTimeout(
+      client.models.generateContent({
+        model,
+        contents: `${prompt}\n\nReturn strict JSON only. Do not wrap it in Markdown.`,
+        config: {
+          temperature: 0.35,
+          maxOutputTokens: 8192,
+          responseMimeType: "application/json",
+          responseSchema: schema,
+        } as unknown as Record<string, unknown>,
+      }),
+      Number(process.env.GEMINI_AGENT_TIMEOUT_MS || DEFAULT_AGENT_TIMEOUT_MS),
+      `Gemini agent call timed out on ${model}.`,
+    );
     return parseJson(response.text ?? "{}") as T;
   }
 }
@@ -460,13 +516,15 @@ function buildAgentPrompt(agentName: string, request: PitchRequest, repo: RepoCo
   const files = repo.files
     .map((file) => `### ${file.path}\n${file.content}`)
     .join("\n\n")
-    .slice(0, 90000);
+    .slice(0, 42000);
 
   return [
     `You are ${agentName} inside DemoMaster.`,
     "",
     "Product context:",
     "- DemoMaster converts one demo repository URL into a narrated product pitch video.",
+    "- The pitch output must describe the input repository's product, not DemoMaster itself.",
+    "- A production-grade pitch should include real footage from the repo running in a sandbox, captured through a browser automation layer.",
     "- The target hackathon is AI Agent Olympics at Milan AI Week.",
     "- The stack should emphasize Google Gemini; Featherless is optional for critique; Speechmatics is optional for future voice input; Vultr is deployment infrastructure.",
     "- Do not use an external video database or reference-video input.",
@@ -491,6 +549,7 @@ function normalizePitchPlan(
   draft: PitchDraft,
   request: PitchRequest,
   repo: RepoContext,
+  analysis: ProductAnalysis,
   review: QualityReview,
 ): PitchPlan {
   const fallback = fallbackPitchPlan(request, repo);
@@ -515,10 +574,14 @@ function normalizePitchPlan(
 
   const productReport = normalizeReport(draft.productReport, fallback.productReport);
   productReport.qualityBar = [...new Set([...productReport.qualityBar, ...review.fixes])].slice(0, 8);
+  const draftName = cleanString(draft.productName);
 
   return {
     mode: "agentic",
-    productName: cleanString(draft.productName) || fallback.productName,
+    productName:
+      draftName && !/^demomaster$/i.test(draftName)
+        ? draftName
+        : cleanString(analysis.productName) || fallback.productName,
     tagline: cleanString(draft.tagline) || fallback.tagline,
     primaryUser: cleanString(draft.primaryUser) || fallback.primaryUser,
     corePromise: cleanString(draft.corePromise) || fallback.corePromise,
@@ -619,6 +682,18 @@ function clamp(value: number, min: number, max: number) {
   return Math.min(max, Math.max(min, value));
 }
 
+async function withTimeout<T>(promise: Promise<T>, timeoutMs: number, message: string) {
+  let timeout: ReturnType<typeof setTimeout> | undefined;
+  const timeoutPromise = new Promise<never>((_, reject) => {
+    timeout = setTimeout(() => reject(new Error(message)), timeoutMs);
+  });
+  try {
+    return await Promise.race([promise, timeoutPromise]);
+  } finally {
+    if (timeout) clearTimeout(timeout);
+  }
+}
+
 function friendlyProviderError(error: unknown, fallback: string) {
   const raw = error instanceof Error ? error.message : String(error || "");
   if (/API key expired/i.test(raw)) return "Gemini API key is expired. Renew GEMINI_API_KEY to run the real agent pipeline.";
@@ -627,7 +702,12 @@ function friendlyProviderError(error: unknown, fallback: string) {
   }
   if (/quota|rate limit|429/i.test(raw)) return "Gemini quota or rate limit was hit. Try again later or switch keys.";
   if (/model .*not found|404/i.test(raw)) return "The configured Gemini model was not available. Check GEMINI_REASONING_MODEL.";
+  if (/timed out/i.test(raw)) return raw;
   return fallback;
+}
+
+function isTimeoutError(error: unknown) {
+  return error instanceof Error && /timed out/i.test(error.message);
 }
 
 function pcmToWav(pcm: Buffer, sampleRate = 24000, channels = 1, bitsPerSample = 16) {

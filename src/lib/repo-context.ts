@@ -18,9 +18,10 @@ interface GitHubTreeResponse {
   truncated: boolean;
 }
 
-const MAX_FILES = 22;
-const MAX_FILE_CHARS = 5200;
-const MAX_TOTAL_CHARS = 82000;
+const MAX_FILES = 12;
+const MAX_FILE_CHARS = 3200;
+const MAX_TOTAL_CHARS = 36000;
+const GITHUB_FETCH_TIMEOUT_MS = 12000;
 
 const IMPORTANT_FILE = /(^readme|package\.json$|pnpm-workspace|turbo\.json|next\.config|vite\.config|src\/|app\/|pages\/|components\/|lib\/|server\/|api\/|docs\/|prisma\/|schema|routes|README)/i;
 const SKIP_FILE = /(^|\/)(node_modules|\.git|\.next|dist|build|coverage|out|vendor|public\/.*\.(png|jpe?g|gif|webp|avif|mp4|mov|mp3|wav)|package-lock\.json|pnpm-lock\.yaml|yarn\.lock)(\/|$)/i;
@@ -137,7 +138,7 @@ function githubHeaders() {
 }
 
 async function githubFetch<T>(url: string, headers: Record<string, string>): Promise<T> {
-  const response = await fetch(url, { headers, cache: "no-store" });
+  const response = await fetchWithTimeout(url, { headers, cache: "no-store" }, GITHUB_FETCH_TIMEOUT_MS);
   if (!response.ok) {
     throw new Error(`${response.status} ${response.statusText}`);
   }
@@ -145,11 +146,21 @@ async function githubFetch<T>(url: string, headers: Record<string, string>): Pro
 }
 
 async function fetchText(url: string, headers: Record<string, string>) {
-  const response = await fetch(url, { headers, cache: "no-store" });
+  const response = await fetchWithTimeout(url, { headers, cache: "no-store" }, GITHUB_FETCH_TIMEOUT_MS);
   if (!response.ok) {
     throw new Error(`${response.status} ${response.statusText}`);
   }
   return response.text();
+}
+
+async function fetchWithTimeout(url: string, init: RequestInit, timeoutMs: number) {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetch(url, { ...init, signal: controller.signal });
+  } finally {
+    clearTimeout(timeout);
+  }
 }
 
 function selectFiles(items: GitHubTreeItem[]) {
