@@ -238,6 +238,16 @@ async function performDemoInteractionFlow(page: import("playwright").Page, repoU
   await page.mouse.move(170, 120);
   await page.waitForTimeout(450);
 
+  if (await isSauceDemo(page)) {
+    summary.push(...(await runSauceDemoFlow(page)));
+    return summary;
+  }
+
+  if (await isTodoMvc(page)) {
+    summary.push(...(await runTodoMvcFlow(page)));
+    return summary;
+  }
+
   const input = await findRepoLikeInput(page);
   if (input) {
     await input.click({ timeout: 2500 }).catch(() => undefined);
@@ -294,8 +304,12 @@ async function findRepoLikeInput(page: import("playwright").Page) {
     return locator;
   }
 
-  const fallback = page.locator("input").first();
-  if ((await fallback.count().catch(() => 0)) && (await fallback.isVisible().catch(() => false))) return fallback;
+  const bodyText = await page.locator("body").innerText({ timeout: 1200 }).catch(() => "");
+  if (/\b(github|repository|repo url|repo|generate pitch|demomaster)\b/i.test(bodyText)) {
+    const fallback = page.locator("input").first();
+    if ((await fallback.count().catch(() => 0)) && (await fallback.isVisible().catch(() => false))) return fallback;
+  }
+
   return null;
 }
 
@@ -378,6 +392,117 @@ async function runPublicProductFlow(page: import("playwright").Page) {
   }
 
   return summary.length ? summary : ["Explored the visible product page without submitting data."];
+}
+
+async function isSauceDemo(page: import("playwright").Page) {
+  if (/saucedemo\.com/i.test(page.url())) return true;
+  const username = page.locator('[data-test="username"], #user-name').first();
+  return (await username.count().catch(() => 0)) > 0;
+}
+
+async function runSauceDemoFlow(page: import("playwright").Page) {
+  const summary: string[] = [];
+  const username = page.locator('[data-test="username"], #user-name').first();
+  const password = page.locator('[data-test="password"], #password').first();
+  const login = page.locator('[data-test="login-button"], #login-button').first();
+
+  if ((await username.count().catch(() => 0)) && (await password.count().catch(() => 0))) {
+    await username.fill("standard_user", { timeout: 3500 });
+    await page.waitForTimeout(350);
+    await password.fill("secret_sauce", { timeout: 3500 });
+    await page.waitForTimeout(350);
+    summary.push("Entered the public demo credentials shown by the test storefront.");
+  }
+
+  if (await login.isVisible().catch(() => false)) {
+    await login.click({ timeout: 3500 });
+    await page.waitForLoadState("domcontentloaded", { timeout: 7000 }).catch(() => undefined);
+    await page.waitForTimeout(1000);
+    summary.push("Signed in to the demo storefront and landed on the product inventory page.");
+  }
+
+  const backpack = page.locator('[data-test="add-to-cart-sauce-labs-backpack"], button:has-text("Add to cart")').first();
+  if (await backpack.isVisible().catch(() => false)) {
+    await backpack.click({ timeout: 3500 });
+    await page.waitForTimeout(650);
+    summary.push("Added the Sauce Labs Backpack to the cart.");
+  }
+
+  const cart = page.locator('[data-test="shopping-cart-link"], .shopping_cart_link').first();
+  if (await cart.isVisible().catch(() => false)) {
+    await cart.click({ timeout: 3500 });
+    await page.waitForTimeout(900);
+    summary.push("Opened the cart and confirmed the selected item.");
+  }
+
+  const checkout = page.locator('[data-test="checkout"], button:has-text("Checkout")').first();
+  if (await checkout.isVisible().catch(() => false)) {
+    await checkout.click({ timeout: 3500 });
+    await page.waitForTimeout(800);
+    summary.push("Started checkout from the cart.");
+  }
+
+  const firstName = page.locator('[data-test="firstName"], #first-name').first();
+  const lastName = page.locator('[data-test="lastName"], #last-name').first();
+  const postalCode = page.locator('[data-test="postalCode"], #postal-code').first();
+  if (await firstName.isVisible().catch(() => false)) {
+    await firstName.fill("Demo", { timeout: 3500 });
+    await lastName.fill("Buyer", { timeout: 3500 });
+    await postalCode.fill("12345", { timeout: 3500 });
+    await page.waitForTimeout(650);
+    summary.push("Filled the checkout form with fake demo buyer information.");
+  }
+
+  const continueButton = page.locator('[data-test="continue"], input[type="submit"], button:has-text("Continue")').first();
+  if (await continueButton.isVisible().catch(() => false)) {
+    await continueButton.click({ timeout: 3500 });
+    await page.waitForTimeout(900);
+    summary.push("Continued to the order overview screen.");
+  }
+
+  const finish = page.locator('[data-test="finish"], button:has-text("Finish")').first();
+  if (await finish.isVisible().catch(() => false)) {
+    await finish.click({ timeout: 3500 });
+    await page.waitForTimeout(1200);
+    summary.push("Finished the demo checkout and showed the confirmation screen.");
+  }
+
+  return summary.length ? summary : ["Explored the Sauce Demo storefront without submitting real payment or personal data."];
+}
+
+async function isTodoMvc(page: import("playwright").Page) {
+  const todoInput = page.locator('input[placeholder="What needs to be done?"], .new-todo').first();
+  return (await todoInput.count().catch(() => 0)) > 0;
+}
+
+async function runTodoMvcFlow(page: import("playwright").Page) {
+  const summary: string[] = [];
+  const input = page.locator('input[placeholder="What needs to be done?"], .new-todo').first();
+  if (!(await input.isVisible().catch(() => false))) return ["Opened the TodoMVC app, but the task input was not visible."];
+
+  await input.fill("Draft the pitch script", { timeout: 3000 });
+  await input.press("Enter", { timeout: 3000 });
+  await page.waitForTimeout(450);
+  await input.fill("Record the product demo", { timeout: 3000 });
+  await input.press("Enter", { timeout: 3000 });
+  await page.waitForTimeout(450);
+  summary.push("Created two tasks in the TodoMVC workflow.");
+
+  const firstToggle = page.locator(".toggle").first();
+  if (await firstToggle.isVisible().catch(() => false)) {
+    await firstToggle.check({ timeout: 3000 }).catch(() => firstToggle.click({ timeout: 3000 }));
+    await page.waitForTimeout(650);
+    summary.push("Marked the first task complete to show state change.");
+  }
+
+  const completed = page.getByRole("link", { name: /completed/i }).first();
+  if (await completed.isVisible().catch(() => false)) {
+    await completed.click({ timeout: 3000 });
+    await page.waitForTimeout(650);
+    summary.push("Filtered to completed tasks to show workflow navigation.");
+  }
+
+  return summary;
 }
 
 async function findPrimaryProductAction(page: import("playwright").Page) {
