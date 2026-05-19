@@ -49,7 +49,7 @@ export async function POST(request: Request) {
               provider: "browser" as const,
               entries: [
                 {
-                  step: "Prepare Vultr runner",
+                  step: "Prepare browser capture",
                   status: "done" as const,
                   message: pitch.capturePlan.message,
                 },

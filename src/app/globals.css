@@ -525,6 +525,76 @@ a {
   margin-top: 1px;
 }
 
+.live-run {
+  display: grid;
+  gap: 12px;
+}
+
+.live-run-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+  border-bottom: 1px solid var(--line);
+  padding-bottom: 12px;
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 750;
+}
+
+.live-run-head strong {
+  flex: 0 0 auto;
+  font-family: "Geist Mono", "Geist Mono Fallback", ui-monospace, monospace;
+  font-size: 12px;
+}
+
+.progress-list {
+  gap: 12px;
+}
+
+.run-step {
+  position: relative;
+  display: grid !important;
+  grid-template-columns: 18px 1fr;
+  gap: 10px !important;
+}
+
+.run-step-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 22px;
+}
+
+.run-step.waiting .run-step-icon::before {
+  width: 7px;
+  height: 7px;
+  border-radius: 999px;
+  background: var(--line);
+  content: "";
+}
+
+.run-step.running .run-step-icon svg {
+  color: var(--blue);
+}
+
+.run-step-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  color: var(--text);
+  font-weight: 760;
+}
+
+.run-step p {
+  margin: 5px 0 0;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
 .small-status,
 .log-status {
   display: inline-flex;
@@ -615,54 +685,13 @@ a {
   padding: 10px;
 }
 
-.manual-runner {
-  display: grid;
-  gap: 10px;
-  border: 1px solid var(--line);
-  border-radius: 8px;
-  background: #f8fafc;
-  padding: 12px;
-}
-
-.manual-runner-head {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 12px;
-}
-
-.manual-runner-head strong {
-  display: block;
-  color: var(--ink);
-  font-size: 13px;
-}
-
-.manual-script {
-  width: 100%;
-  min-height: 170px;
-  resize: vertical;
-  border: 1px solid var(--line-strong);
-  border-radius: 7px;
-  background: #ffffff;
-  color: var(--ink);
-  padding: 10px 12px;
-  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
-  font-size: 12px;
-  line-height: 1.45;
-  outline: none;
-}
-
-.manual-script:focus {
-  border-color: var(--blue);
-  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.12);
-}
-
 .capture-preview {
   display: grid;
   gap: 10px;
 }
 
 .capture-preview img,
+.capture-preview video,
 .capture-empty {
   width: 100%;
   aspect-ratio: 16 / 9;
@@ -781,7 +810,6 @@ a {
   .topbar,
   .stage-controls,
   .button-row,
-  .manual-runner-head,
   .stage-meta {
     align-items: stretch;
     grid-template-columns: 1fr;

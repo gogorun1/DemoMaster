@@ -6,9 +6,10 @@ The app is intentionally repo-only:
 
 1. Paste a GitHub repository URL.
 2. Gemini agents inspect the repo, define the product flow, write the pitch, and judge the quality.
-3. Gemini generates narration audio.
-4. A Demo Capture Agent can provision or attach a Vultr VM, run the repo, and capture real browser footage.
-5. The browser renders a playable 16:9 pitch video that can be exported as WebM.
+3. A Browser Capture Agent records a public hosted demo URL when one is available.
+4. If no public URL works, the app clones the repo into `/tmp`, installs dependencies, starts it locally, and records real browser footage with Playwright.
+5. A Capture Alignment Agent rewrites the final script against the captured UI, then Gemini regenerates narration audio.
+6. The browser renders a playable 16:9 pitch video that can be exported as WebM.
 
 No reference-video input or external video-database workflow is used.
 
@@ -17,7 +18,7 @@ No reference-video input or external video-database workflow is used.
 - Google Gemini: primary reasoning, strategy, storyboard, quality judge, and narration audio.
 - Featherless: visible Open Model Critic Agent through an OpenAI-compatible API.
 - Speechmatics: Voice QA Agent that transcribes generated narration and checks it against the transcript.
-- Vultr: VM runner for cloning the repository, launching it, and capturing real demo footage through API or manual Console flow.
+- Playwright: public URL and local browser capture without remote infrastructure provisioning.
 
 ## Getting Started
 
@@ -56,27 +57,19 @@ SPEECHMATICS_API_KEY=...
 SPEECHMATICS_LANGUAGE=en
 SPEECHMATICS_OPERATING_POINT=enhanced
 SPEECHMATICS_QA_TIMEOUT_MS=45000
-VULTR_API_KEY=...
-VULTR_ENABLE_PROVISIONING=false
-VULTR_REGION=ams
-VULTR_PLAN=vc2-1c-2gb
-VULTR_OS_ID=1743
+GEMINI_CAPTURE_ALIGN_TIMEOUT_MS=45000
 ```
 
 `GITHUB_TOKEN` is optional for public repositories, but helps avoid rate limits and is required for private repos. If `GEMINI_API_KEY` is absent, the app returns a deterministic fallback so the UI stays usable.
 
-## Demo Capture Runner
+## Demo Capture
 
-The app includes a Vultr-backed Demo Capture Agent:
+DemoMaster uses two capture paths, in this order:
 
-- Gemini creates a capture plan from the repo.
-- The user explicitly clicks `Start Vultr runner`.
-- If Vultr API access is available, the server calls the Vultr API to create a VM with cloud-init user data.
-- If `Enable API` is blocked on the hackathon account, click `Prepare` under Manual Vultr runner, paste the generated cloud-init into a regular Vultr Compute instance in the Console, then attach `http://<VULTR_PUBLIC_IP>:8090/status.json`.
-- The VM clones the repo, detects the package manager, installs dependencies, starts the app, installs Playwright, and writes `capture.png`, `capture.webm`, and `status.json`.
-- The web UI polls runner status and uses the captured screenshot in the video renderer.
+- Public URL capture: reads GitHub homepage metadata and hosted demo links from sampled repo files, then records the page with Playwright.
+- Local runner capture: clones the repo into `/tmp/demomaster-runs`, detects npm/pnpm/yarn, installs dependencies, starts `dev`, `start`, or `preview`, then records `http://127.0.0.1:<port>`.
 
-Provisioning is disabled unless `VULTR_ENABLE_PROVISIONING=true` to avoid accidental paid resource creation. Use `Destroy VM` in the UI after capture.
+Capture artifacts are stored under `/tmp/demomaster-captures` and served through `/api/captures/...`. Temporary local runner folders are removed after capture.
 
 ## Scripts
 
