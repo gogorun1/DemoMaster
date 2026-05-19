@@ -697,11 +697,12 @@ a {
   aspect-ratio: 16 / 9;
   border: 1px solid var(--line);
   border-radius: 8px;
-  background: #eef2f7;
+  background: #0f172a;
   object-fit: cover;
 }
 
 .capture-empty {
+  background: #eef2f7;
   display: grid;
   place-items: center;
   color: var(--muted);

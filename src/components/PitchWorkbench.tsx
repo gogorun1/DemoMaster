@@ -512,7 +512,14 @@ export function PitchWorkbench() {
                   </div>
                   <div className="capture-preview">
                     {result.capture?.videoUrl ? (
-                      <video src={result.capture.videoUrl} controls muted playsInline preload="metadata" />
+                      <video
+                        src={result.capture.videoUrl}
+                        controls
+                        muted
+                        playsInline
+                        preload="auto"
+                        poster={result.capture.screenshotUrl}
+                      />
                     ) : result.capture?.screenshotUrl ? (
                       // eslint-disable-next-line @next/next/no-img-element
                       <img src={result.capture.screenshotUrl} alt="Captured product demo" />
