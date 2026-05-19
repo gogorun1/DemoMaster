@@ -8,6 +8,7 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint .",
+    "secrets:scan": "gitleaks detect --source . --redact --config .gitleaks.toml",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {

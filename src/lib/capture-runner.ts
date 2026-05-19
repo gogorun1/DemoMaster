@@ -12,6 +12,7 @@ const VIEWPORT = { width: 1280, height: 720 };
 const PUBLIC_CAPTURE_TIMEOUT_MS = 45000;
 const LOCAL_INSTALL_TIMEOUT_MS = 180000;
 const LOCAL_BOOT_TIMEOUT_MS = 70000;
+const LOCAL_RUNNER_ENABLE_FLAG = "1";
 
 type CaptureProvider = DemoCaptureResult["provider"];
 
@@ -109,6 +110,19 @@ async function captureLocalRepo(repoUrl: string, plan: DemoCapturePlan, previous
           step: "Run local repo",
           status: "skipped",
           message: "Local runner currently accepts GitHub repository URLs only.",
+        },
+      ],
+    };
+  }
+
+  const runnerGate = localRunnerGate(parsed.owner, parsed.repo);
+  if (!runnerGate.allowed) {
+    return {
+      entries: [
+        {
+          step: "Run local repo",
+          status: "skipped",
+          message: runnerGate.message,
         },
       ],
     };
@@ -609,9 +623,11 @@ async function enableCorepack(manager: string, cwd: string) {
 }
 
 async function runInstall(manager: string, cwd: string) {
-  if (manager === "pnpm") return runCommand("corepack", ["pnpm", "install", "--no-frozen-lockfile"], cwd, LOCAL_INSTALL_TIMEOUT_MS);
-  if (manager === "yarn") return runCommand("corepack", ["yarn", "install"], cwd, LOCAL_INSTALL_TIMEOUT_MS);
-  return runCommand("npm", ["install"], cwd, LOCAL_INSTALL_TIMEOUT_MS);
+  if (manager === "pnpm") {
+    return runCommand("corepack", ["pnpm", "install", "--no-frozen-lockfile", "--ignore-scripts"], cwd, LOCAL_INSTALL_TIMEOUT_MS);
+  }
+  if (manager === "yarn") return runCommand("corepack", ["yarn", "install", "--ignore-scripts"], cwd, LOCAL_INSTALL_TIMEOUT_MS);
+  return runCommand("npm", ["install", "--ignore-scripts"], cwd, LOCAL_INSTALL_TIMEOUT_MS);
 }
 
 function startApp(manager: string, script: string, cwd: string, port: number) {
@@ -622,7 +638,7 @@ function startApp(manager: string, script: string, cwd: string, port: number) {
     detached: true,
     stdio: "ignore",
     env: {
-      ...process.env,
+      ...localRunnerEnv(),
       BROWSER: "none",
       CI: "1",
       HOST: "127.0.0.1",
@@ -649,7 +665,7 @@ function runLabel(manager: string, script: string) {
 }
 
 async function runCommand(command: string, args: string[], cwd: string, timeoutMs: number) {
-  const child = spawn(command, args, { cwd, env: process.env, stdio: ["ignore", "pipe", "pipe"] });
+  const child = spawn(command, args, { cwd, env: localRunnerEnv(), stdio: ["ignore", "pipe", "pipe"] });
   let output = "";
   child.stdout?.on("data", (chunk) => {
     output += chunk.toString();
@@ -676,15 +692,57 @@ async function runCommand(command: string, args: string[], cwd: string, timeoutM
 }
 
 function githubCloneUrl(owner: string, repo: string) {
-  const token = process.env.GITHUB_TOKEN?.trim();
-  if (!token) return `https://github.com/${owner}/${repo}.git`;
-  return `https://x-access-token:${encodeURIComponent(token)}@github.com/${owner}/${repo}.git`;
+  return `https://github.com/${owner}/${repo}.git`;
 }
 
 function redact(value: string) {
   return value
     .replace(/x-access-token:[^@\s]+@github\.com/gi, "x-access-token:[redacted]@github.com")
     .replace(/Bearer\s+[A-Za-z0-9._~+/=-]+/g, "Bearer [redacted]");
+}
+
+function localRunnerGate(owner: string, repo: string) {
+  if (process.env.DEMOMASTER_ENABLE_LOCAL_RUNNER !== LOCAL_RUNNER_ENABLE_FLAG) {
+    return {
+      allowed: false,
+      message: "Local runner is disabled by default. Set DEMOMASTER_ENABLE_LOCAL_RUNNER=1 and allowlist trusted repositories before running repository code.",
+    };
+  }
+
+  const repoKey = `${owner}/${repo}`.toLowerCase();
+  const allowedRepos = parseList(process.env.DEMOMASTER_LOCAL_RUNNER_ALLOWED_REPOS);
+  if (!allowedRepos.has(repoKey)) {
+    return {
+      allowed: false,
+      message: `Local runner refused ${owner}/${repo}; add it to DEMOMASTER_LOCAL_RUNNER_ALLOWED_REPOS only after trust review.`,
+    };
+  }
+
+  return { allowed: true, message: "Local runner enabled for an allowlisted repository." };
+}
+
+function parseList(value: string | undefined) {
+  return new Set(
+    (value || "")
+      .split(",")
+      .map((item) => item.trim().toLowerCase())
+      .filter(Boolean),
+  );
+}
+
+function localRunnerEnv(): NodeJS.ProcessEnv {
+  return {
+    PATH: process.env.PATH || "/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin",
+    HOME: process.env.HOME || tmpdir(),
+    TMPDIR: process.env.TMPDIR || tmpdir(),
+    NODE_ENV: process.env.NODE_ENV || "production",
+    CI: "1",
+    GIT_TERMINAL_PROMPT: "0",
+    NEXT_TELEMETRY_DISABLED: "1",
+    npm_config_audit: "false",
+    npm_config_fund: "false",
+    npm_config_ignore_scripts: "true",
+  };
 }
 
 async function waitForHttp(url: string, timeoutMs: number) {

@@ -62,6 +62,15 @@ GEMINI_CAPTURE_ALIGN_TIMEOUT_MS=45000
 
 `GITHUB_TOKEN` is optional for public repositories, but helps avoid rate limits and is required for private repos. If `GEMINI_API_KEY` is absent, the app returns a deterministic fallback so the UI stays usable.
 
+Local repository execution is disabled by default because submitted repositories are untrusted code. To run the local fallback for trusted repositories only, set both values:
+
+```bash
+DEMOMASTER_ENABLE_LOCAL_RUNNER=1
+DEMOMASTER_LOCAL_RUNNER_ALLOWED_REPOS=owner/repo
+```
+
+The local runner uses a minimal child-process environment, disables package lifecycle scripts during install, and no longer injects provider or GitHub tokens into cloned repositories. Run it inside an external sandbox/container with restricted egress before enabling it for anything beyond a reviewed allowlist.
+
 ## Demo Capture
 
 DemoMaster uses two capture paths, in this order:
@@ -70,6 +79,15 @@ DemoMaster uses two capture paths, in this order:
 - Local runner capture: clones the repo into `/tmp/demomaster-runs`, detects npm/pnpm/yarn, installs dependencies, starts `dev`, `start`, or `preview`, then records `http://127.0.0.1:<port>`.
 
 Capture artifacts are stored under `/tmp/demomaster-captures` and served through `/api/captures/...`. Temporary local runner folders are removed after capture.
+
+## Secret Scanning
+
+```bash
+gitleaks detect --source . --redact --config .gitleaks.toml
+pre-commit install
+```
+
+CI runs gitleaks on pushes to `main` and pull requests. Enable GitHub secret scanning and push protection in repository settings as an additional server-side guard.
 
 ## Scripts
 
