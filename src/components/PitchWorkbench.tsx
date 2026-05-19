@@ -6,7 +6,6 @@ import {
   Camera,
   CheckCircle2,
   Code2,
-  Copy,
   Download,
   ExternalLink,
   FileText,
@@ -16,33 +15,95 @@ import {
   Play,
   RefreshCcw,
   Sparkles,
-  Trash2,
   Trophy,
 } from "lucide-react";
 import { VideoCanvas } from "@/components/VideoCanvas";
 import { drawPitchFrame, getTotalDuration } from "@/lib/render-frame";
-import type { AgentLog, AgentLogEntry, DemoCaptureResult, PitchResponse } from "@/lib/types";
+import type { AgentLog, AgentLogEntry, AgentName, DemoCaptureResult, PitchResponse } from "@/lib/types";
 
 const sampleRepo = "https://github.com/vercel/ai-chatbot";
+
+const liveRunSteps: Array<{ agent: AgentName; label: string; detail: string }> = [
+  {
+    agent: "Repo Forensics Agent",
+    label: "Inspect repo",
+    detail: "Reading high-signal files and extracting product evidence.",
+  },
+  {
+    agent: "Pitch Strategy Agent",
+    label: "Design product flow",
+    detail: "Turning repo evidence into user need, positioning, and flow.",
+  },
+  {
+    agent: "Creative Director Agent",
+    label: "Write pitch",
+    detail: "Writing the storyboard, transcript, and product report.",
+  },
+  {
+    agent: "Demo Capture Agent",
+    label: "Plan capture",
+    detail: "Choosing public URL capture first, then local runner if needed.",
+  },
+  {
+    agent: "Browser Capture Agent",
+    label: "Record demo",
+    detail: "Recording a hosted demo URL or running the repo locally with Playwright.",
+  },
+  {
+    agent: "Open Model Critic Agent",
+    label: "Open-model critique",
+    detail: "Using Featherless to critique specificity and judge-readiness.",
+  },
+  {
+    agent: "Quality Judge Agent",
+    label: "Judge quality",
+    detail: "Scoring the plan and applying final improvements.",
+  },
+  {
+    agent: "Capture Alignment Agent",
+    label: "Align script",
+    detail: "Rewriting the script against the captured UI.",
+  },
+  {
+    agent: "Media Renderer Agent",
+    label: "Render voice",
+    detail: "Generating narration and preparing the browser video renderer.",
+  },
+  {
+    agent: "Voice QA Agent",
+    label: "Verify voice",
+    detail: "Checking the narration against the transcript with Speechmatics.",
+  },
+];
+
+type PitchStreamEvent =
+  | { type: "status"; message: string }
+  | { type: "agentLog"; log: AgentLog }
+  | { type: "complete"; response: PitchResponse }
+  | { type: "error"; message: string };
 
 export function PitchWorkbench() {
   const [repoUrl, setRepoUrl] = useState(sampleRepo);
   const [result, setResult] = useState<PitchResponse | null>(null);
   const [currentTime, setCurrentTime] = useState(0);
   const [isGenerating, setIsGenerating] = useState(false);
+  const [elapsedSeconds, setElapsedSeconds] = useState(0);
+  const [liveAgentLogs, setLiveAgentLogs] = useState<AgentLog[]>([]);
+  const [liveMessage, setLiveMessage] = useState("");
   const [isPlaying, setIsPlaying] = useState(false);
   const [isExporting, setIsExporting] = useState(false);
-  const [isStartingCapture, setIsStartingCapture] = useState(false);
-  const [isDestroyingCapture, setIsDestroyingCapture] = useState(false);
-  const [isPreparingManualRunner, setIsPreparingManualRunner] = useState(false);
-  const [isAttachingManualRunner, setIsAttachingManualRunner] = useState(false);
-  const [manualCloudInit, setManualCloudInit] = useState("");
-  const [manualStatusUrl, setManualStatusUrl] = useState("");
   const [error, setError] = useState("");
   const [exportUrl, setExportUrl] = useState("");
   const audioRef = useRef<HTMLAudioElement>(null);
 
   const totalDuration = useMemo(() => (result ? getTotalDuration(result.pitch) : 0), [result]);
+
+  useEffect(() => {
+    if (!isGenerating) return;
+
+    const timer = window.setInterval(() => setElapsedSeconds((value) => value + 1), 1000);
+    return () => window.clearInterval(timer);
+  }, [isGenerating]);
 
   useEffect(() => {
     if (!isPlaying || !result) return;
@@ -67,38 +128,55 @@ export function PitchWorkbench() {
     return () => cancelAnimationFrame(frame);
   }, [currentTime, isPlaying, result, totalDuration]);
 
-  useEffect(() => {
-    const instanceId = result?.capture?.instanceId;
-    const shouldPoll = result?.capture?.status === "running";
-    if (!instanceId || !shouldPoll) return;
-
-    const timer = window.setInterval(() => {
-      refreshCapture(instanceId).catch((refreshError) => {
-        setError(refreshError instanceof Error ? refreshError.message : "Capture status failed.");
-      });
-    }, 12000);
-
-    return () => window.clearInterval(timer);
-    // refreshCapture reads the latest result state and is intentionally not a stable polling dependency.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [result?.capture?.instanceId, result?.capture?.status]);
-
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setIsGenerating(true);
+    setElapsedSeconds(0);
+    setLiveAgentLogs([]);
+    setLiveMessage("Starting agent run.");
     setIsPlaying(false);
     setError("");
     setExportUrl("");
+    setResult(null);
 
     try {
-      const response = await fetch("/api/pitch", {
+      const response = await fetch("/api/pitch/stream", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ repoUrl }),
       });
-      const body = await response.json();
-      if (!response.ok) throw new Error(body.error || "Generation failed.");
-      setResult(body as PitchResponse);
+      if (!response.ok || !response.body) {
+        const body = await response.json().catch(() => ({}));
+        throw new Error(body.error || "Generation failed.");
+      }
+
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+      let finalResult: PitchResponse | null = null;
+
+      while (true) {
+        const { done, value } = await reader.read();
+        buffer += decoder.decode(value, { stream: !done });
+        const lines = buffer.split("\n");
+        buffer = lines.pop() || "";
+
+        for (const line of lines) {
+          if (!line.trim()) continue;
+          const event = JSON.parse(line) as PitchStreamEvent;
+          if (event.type === "status") setLiveMessage(event.message);
+          if (event.type === "agentLog") setLiveAgentLogs((logs) => mergeAgentLog(logs, event.log));
+          if (event.type === "error") throw new Error(event.message);
+          if (event.type === "complete") finalResult = event.response;
+        }
+
+        if (done) break;
+      }
+
+      if (!finalResult) throw new Error("Generation ended before a pitch response was returned.");
+      setResult(finalResult);
+      finalResult = await runAutomaticCapture(finalResult);
+      setResult(finalResult);
       setCurrentTime(0);
     } catch (generationError) {
       setError(generationError instanceof Error ? generationError.message : "Generation failed.");
@@ -107,125 +185,67 @@ export function PitchWorkbench() {
     }
   }
 
-  async function startVultrCapture() {
-    if (!result) return;
-    setIsStartingCapture(true);
-    setError("");
+  async function runAutomaticCapture(baseResult: PitchResponse) {
+    let nextResult = baseResult;
+
     try {
-      const response = await fetch("/api/vultr/start", {
+      setLiveMessage("Capturing the demo: public URL first, local runner if needed.");
+      const captureResponse = await fetch("/api/capture", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ repoUrl, capturePlan: result.pitch.capturePlan }),
+        body: JSON.stringify({ repoUrl, capturePlan: baseResult.pitch.capturePlan }),
       });
-      const body = (await response.json()) as { capture?: DemoCaptureResult; agentLog?: AgentLog; error?: string };
-      if (!response.ok) throw new Error(body.error || "Could not start Vultr runner.");
-      updateCapture(body.capture, body.agentLog);
+      const captureBody = (await captureResponse.json()) as { capture?: DemoCaptureResult; agentLog?: AgentLog; error?: string };
+      if (!captureResponse.ok) throw new Error(captureBody.error || "Could not capture demo.");
+      const captureLog = captureBody.agentLog;
+      if (captureLog) setLiveAgentLogs((logs) => mergeAgentLog(logs, captureLog));
+      nextResult = attachCapture(nextResult, captureBody.capture, captureLog);
+      setResult(nextResult);
+
+      if (!captureBody.capture || captureBody.capture.status !== "ready") {
+        const message = captureBody.capture?.message || "Demo capture was not available.";
+        nextResult = {
+          ...nextResult,
+          warnings: [...new Set([...nextResult.warnings, message])],
+        };
+        setResult(nextResult);
+        return nextResult;
+      }
+
+      setLiveMessage("Rewriting the final pitch so the script matches the captured footage.");
+      const alignResponse = await fetch("/api/pitch/align", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ pitch: nextResult.pitch, capture: captureBody.capture }),
+      });
+      const alignBody = (await alignResponse.json()) as {
+        pitch?: PitchResponse["pitch"];
+        audio?: PitchResponse["audio"];
+        voiceQa?: PitchResponse["voiceQa"];
+        agentLogs?: AgentLog[];
+        error?: string;
+      };
+      if (!alignResponse.ok || !alignBody.pitch || !alignBody.audio) {
+        throw new Error(alignBody.error || "Could not align pitch with captured footage.");
+      }
+      nextResult = {
+        ...nextResult,
+        pitch: alignBody.pitch,
+        audio: alignBody.audio,
+        voiceQa: alignBody.voiceQa,
+        agentLogs: mergeAgentLogs(nextResult.agentLogs, alignBody.agentLogs || []),
+      };
+      setLiveAgentLogs((logs) => mergeAgentLogs(logs, alignBody.agentLogs || []));
+      setResult(nextResult);
+      return nextResult;
     } catch (captureError) {
-      setError(captureError instanceof Error ? captureError.message : "Could not start Vultr runner.");
-    } finally {
-      setIsStartingCapture(false);
-    }
-  }
-
-  async function refreshCapture(instanceId = result?.capture?.instanceId) {
-    if (!result || !instanceId) return;
-    const response = await fetch("/api/vultr/status", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ instanceId, port: result.pitch.capturePlan.port }),
-    });
-    const body = (await response.json()) as { capture?: DemoCaptureResult; agentLog?: AgentLog; error?: string };
-    if (!response.ok) throw new Error(body.error || "Could not read Vultr runner status.");
-    updateCapture(body.capture, body.agentLog);
-  }
-
-  async function destroyCapture() {
-    if (!result?.capture?.instanceId) return;
-    setIsDestroyingCapture(true);
-    setError("");
-    try {
-      const response = await fetch("/api/vultr/destroy", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ instanceId: result.capture.instanceId }),
-      });
-      const body = (await response.json()) as { capture?: DemoCaptureResult; agentLog?: AgentLog; error?: string };
-      if (!response.ok) throw new Error(body.error || "Could not destroy Vultr runner.");
-      updateCapture(body.capture, body.agentLog);
-    } catch (destroyError) {
-      setError(destroyError instanceof Error ? destroyError.message : "Could not destroy Vultr runner.");
-    } finally {
-      setIsDestroyingCapture(false);
-    }
-  }
-
-  async function prepareManualRunner() {
-    if (!result) return;
-    setIsPreparingManualRunner(true);
-    setError("");
-    try {
-      const response = await fetch("/api/vultr/manual", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ repoUrl, capturePlan: result.pitch.capturePlan }),
-      });
-      const body = (await response.json()) as { cloudInit?: string; statusUrl?: string; agentLog?: AgentLog; error?: string };
-      if (!response.ok) throw new Error(body.error || "Could not prepare manual Vultr runner.");
-      setManualCloudInit(body.cloudInit || "");
-      setManualStatusUrl((current) => current || body.statusUrl || "");
-      if (body.agentLog) updateAgentLog(body.agentLog);
-    } catch (manualError) {
-      setError(manualError instanceof Error ? manualError.message : "Could not prepare manual Vultr runner.");
-    } finally {
-      setIsPreparingManualRunner(false);
-    }
-  }
-
-  async function attachManualRunner() {
-    if (!manualStatusUrl.trim()) return;
-    setIsAttachingManualRunner(true);
-    setError("");
-    try {
-      const response = await fetch("/api/vultr/manual-status", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ statusUrl: manualStatusUrl }),
-      });
-      const body = (await response.json()) as { capture?: DemoCaptureResult; agentLog?: AgentLog; error?: string };
-      if (!response.ok) throw new Error(body.error || "Could not attach manual Vultr runner.");
-      updateCapture(body.capture, body.agentLog);
-    } catch (manualError) {
-      setError(manualError instanceof Error ? manualError.message : "Could not attach manual Vultr runner.");
-    } finally {
-      setIsAttachingManualRunner(false);
-    }
-  }
-
-  async function copyManualCloudInit() {
-    if (!manualCloudInit) return;
-    await navigator.clipboard?.writeText(manualCloudInit).catch(() => undefined);
-  }
-
-  function updateCapture(capture?: DemoCaptureResult, agentLog?: AgentLog) {
-    if (!capture) return;
-    setResult((current) => {
-      if (!current) return current;
+      const message = captureError instanceof Error ? captureError.message : "Demo capture failed.";
+      setError(message);
       return {
-        ...current,
-        capture,
-        agentLogs: agentLog ? upsertAgentLog(current.agentLogs, agentLog) : current.agentLogs,
+        ...nextResult,
+        warnings: [...new Set([...nextResult.warnings, message])],
       };
-    });
-  }
-
-  function updateAgentLog(agentLog: AgentLog) {
-    setResult((current) => {
-      if (!current) return current;
-      return {
-        ...current,
-        agentLogs: upsertAgentLog(current.agentLogs, agentLog),
-      };
-    });
+    }
   }
 
   async function togglePlayback() {
@@ -290,8 +310,8 @@ export function PitchWorkbench() {
 
       recorder.start();
       source?.start();
-      const captureImage = await loadCaptureImage(result.capture?.screenshotUrl);
-      await drawExportFrames(context, result, totalDuration, captureImage);
+      const captureMedia = await loadCaptureMedia(result.capture);
+      await drawExportFrames(context, result, totalDuration, captureMedia);
       source?.stop();
       recorder.stop();
 
@@ -358,14 +378,7 @@ export function PitchWorkbench() {
               <h2>Agent run</h2>
             </div>
             {isGenerating ? (
-              <ul className="run-list">
-                {["Inspect repo", "Design product flow", "Write pitch", "Plan capture", "Judge quality", "Render voice"].map((step) => (
-                  <li key={step}>
-                    <Loader2 size={14} className="spin" />
-                    <span>{step}</span>
-                  </li>
-                ))}
-              </ul>
+              <LiveAgentRun logs={liveAgentLogs} message={liveMessage} elapsedSeconds={elapsedSeconds} />
             ) : result ? (
               <ul className="run-list">
                 {result.agentLogs.map((log) => (
@@ -476,60 +489,9 @@ export function PitchWorkbench() {
                         <dd>{result.pitch.capturePlan.port}</dd>
                       </div>
                     </dl>
-                    <div className="button-row">
-                      <button className="btn primary" type="button" onClick={startVultrCapture} disabled={isStartingCapture || result.capture?.status === "running"}>
-                        {isStartingCapture ? <Loader2 size={17} className="spin" /> : <Camera size={17} />}
-                        Start Vultr runner
-                      </button>
-                      {result.capture?.instanceId ? (
-                        <button className="btn" type="button" onClick={() => refreshCapture()} disabled={result.capture?.status === "destroyed"}>
-                          <RefreshCcw size={17} />
-                          Refresh
-                        </button>
-                      ) : null}
-                      {result.capture?.instanceId && result.capture.status !== "destroyed" ? (
-                        <button className="btn danger" type="button" onClick={destroyCapture} disabled={isDestroyingCapture}>
-                          {isDestroyingCapture ? <Loader2 size={17} className="spin" /> : <Trash2 size={17} />}
-                          Destroy VM
-                        </button>
-                      ) : null}
-                    </div>
-                    <div className="manual-runner">
-                      <div className="manual-runner-head">
-                        <div>
-                          <strong>Manual Vultr runner</strong>
-                          <p>Use this when the hackathon account blocks API access but still allows Console Compute.</p>
-                        </div>
-                        <button className="btn" type="button" onClick={prepareManualRunner} disabled={isPreparingManualRunner}>
-                          {isPreparingManualRunner ? <Loader2 size={17} className="spin" /> : <Code2 size={17} />}
-                          Prepare
-                        </button>
-                      </div>
-                      {manualCloudInit ? (
-                        <>
-                          <div className="button-row">
-                            <button className="btn" type="button" onClick={copyManualCloudInit}>
-                              <Copy size={17} />
-                              Copy cloud-init
-                            </button>
-                          </div>
-                          <textarea className="manual-script" value={manualCloudInit} readOnly spellCheck={false} />
-                          <label className="field compact-field">
-                            <span>Status URL</span>
-                            <input
-                              value={manualStatusUrl}
-                              onChange={(event) => setManualStatusUrl(event.target.value)}
-                              placeholder="http://203.0.113.10:8090/status.json"
-                              spellCheck={false}
-                            />
-                          </label>
-                          <button className="btn primary" type="button" onClick={attachManualRunner} disabled={isAttachingManualRunner}>
-                            {isAttachingManualRunner ? <Loader2 size={17} className="spin" /> : <RefreshCcw size={17} />}
-                            Attach manual runner
-                          </button>
-                        </>
-                      ) : null}
-                    </div>
+                    <p className="muted-copy">
+                      DemoMaster tries a hosted demo URL first. If none works, it clones the repo into a temporary local runner and records it with Playwright.
+                    </p>
                     {result.capture ? (
                       <div className="capture-status">
                         <span className={`small-status ${captureStatusClass(result.capture.status)}`}>{result.capture.status}</span>
@@ -538,26 +500,22 @@ export function PitchWorkbench() {
                     ) : null}
                   </div>
                   <div className="capture-preview">
-                    {result.capture?.screenshotUrl ? (
+                    {result.capture?.videoUrl ? (
+                      <video src={result.capture.videoUrl} controls muted playsInline preload="metadata" />
+                    ) : result.capture?.screenshotUrl ? (
                       // eslint-disable-next-line @next/next/no-img-element
-                      <img src={result.capture.screenshotUrl} alt="Captured product running on Vultr" />
+                      <img src={result.capture.screenshotUrl} alt="Captured product demo" />
                     ) : (
                       <div className="capture-empty">
                         <Camera size={28} />
-                        <span>Vultr runner will attach real product footage here.</span>
+                        <span>Public URL or local runner footage will appear here.</span>
                       </div>
                     )}
                     <div className="capture-links">
-                      {result.capture?.targetUrl ? (
+                      {result.capture?.targetUrl && result.capture.provider === "public-url" ? (
                         <a href={result.capture.targetUrl} target="_blank" rel="noreferrer">
                           <ExternalLink size={14} />
                           Open app
-                        </a>
-                      ) : null}
-                      {result.capture?.statusUrl ? (
-                        <a href={result.capture.statusUrl} target="_blank" rel="noreferrer">
-                          <ExternalLink size={14} />
-                          Status
                         </a>
                       ) : null}
                       {result.capture?.videoUrl ? (
@@ -630,8 +588,8 @@ export function PitchWorkbench() {
                         <span>{log.model || log.provider}</span>
                       </header>
                       <ul>
-                        {log.entries.map((entry) => (
-                          <LogEntry entry={entry} key={`${log.agent}-${entry.step}`} />
+                        {log.entries.map((entry, entryIndex) => (
+                          <LogEntry entry={entry} key={`${log.agent}-${entry.step}-${entryIndex}`} />
                         ))}
                       </ul>
                     </article>
@@ -691,6 +649,47 @@ function FeatureList({ title, items }: { title: string; items: Array<{ name: str
   );
 }
 
+function LiveAgentRun({ logs, message, elapsedSeconds }: { logs: AgentLog[]; message: string; elapsedSeconds: number }) {
+  const logByAgent = new Map(logs.map((log) => [log.agent, log]));
+  const nextIndex = liveRunSteps.findIndex((step) => !logByAgent.has(step.agent));
+  const activeIndex = nextIndex === -1 ? liveRunSteps.length - 1 : nextIndex;
+
+  return (
+    <div className="live-run">
+      <div className="live-run-head">
+        <span>{message || "Running agent pipeline."}</span>
+        <strong>{formatDuration(elapsedSeconds)}</strong>
+      </div>
+      <ul className="run-list progress-list">
+        {liveRunSteps.map((step, index) => {
+          const log = logByAgent.get(step.agent);
+          const hasError = log?.entries.some((entry) => entry.status === "error");
+          const status = hasError ? "error" : log ? "done" : index === activeIndex ? "running" : "waiting";
+          const latestEntry = log?.entries.at(-1);
+          const detail = latestEntry?.message || (status === "running" ? step.detail : "Waiting for previous agent.");
+
+          return (
+            <li key={step.agent} className={`run-step ${status}`}>
+              <div className="run-step-icon">
+                {status === "done" ? <CheckCircle2 size={14} /> : status === "running" ? <Loader2 size={14} className="spin" /> : null}
+              </div>
+              <div>
+                <div className="run-step-title">
+                  <span>{step.label}</span>
+                  <small className={`small-status ${status === "done" ? "ready" : status === "waiting" ? "optional" : status}`}>
+                    {status}
+                  </small>
+                </div>
+                <p>{detail}</p>
+              </div>
+            </li>
+          );
+        })}
+      </ul>
+    </div>
+  );
+}
+
 function LogEntry({ entry }: { entry: AgentLogEntry }) {
   return (
     <li>
@@ -703,9 +702,39 @@ function LogEntry({ entry }: { entry: AgentLogEntry }) {
   );
 }
 
-function upsertAgentLog(logs: AgentLog[], nextLog: AgentLog) {
-  const exists = logs.some((log) => log.agent === nextLog.agent);
-  return exists ? logs.map((log) => (log.agent === nextLog.agent ? nextLog : log)) : [...logs, nextLog];
+function mergeAgentLog(logs: AgentLog[], nextLog: AgentLog) {
+  const existing = logs.find((log) => log.agent === nextLog.agent);
+  if (!existing) return [...logs, nextLog];
+  return logs.map((log) =>
+    log.agent === nextLog.agent
+      ? {
+          ...log,
+          provider: nextLog.provider,
+          model: nextLog.model || log.model,
+          entries: mergeLogEntries(log.entries, nextLog.entries),
+        }
+      : log,
+  );
+}
+
+function mergeLogEntries(entries: AgentLogEntry[], nextEntries: AgentLogEntry[]) {
+  return nextEntries.reduce<AgentLogEntry[]>((merged, entry) => {
+    const index = merged.findIndex((item) => item.step === entry.step);
+    if (index === -1) return [...merged, entry];
+    return merged.map((item, itemIndex) => (itemIndex === index ? entry : item));
+  }, entries);
+}
+
+function mergeAgentLogs(logs: AgentLog[], nextLogs: AgentLog[]) {
+  return nextLogs.reduce((merged, log) => mergeAgentLog(merged, log), logs);
+}
+
+function attachCapture(result: PitchResponse, capture?: DemoCaptureResult, agentLog?: AgentLog) {
+  return {
+    ...result,
+    capture: capture || result.capture,
+    agentLogs: agentLog ? mergeAgentLog(result.agentLogs, agentLog) : result.agentLogs,
+  };
 }
 
 function captureStatusClass(status: DemoCaptureResult["status"]) {
@@ -731,22 +760,51 @@ async function loadCaptureImage(url?: string) {
   }
 }
 
+async function loadCaptureMedia(capture?: DemoCaptureResult) {
+  if (capture?.videoUrl) {
+    try {
+      const video = document.createElement("video");
+      video.crossOrigin = "anonymous";
+      video.muted = true;
+      video.loop = true;
+      video.playsInline = true;
+      video.preload = "auto";
+      await new Promise<void>((resolve, reject) => {
+        video.onloadeddata = () => resolve();
+        video.onerror = () => reject(new Error("Could not load capture video."));
+        video.src = capture.videoUrl || "";
+      });
+      return video;
+    } catch {
+      return loadCaptureImage(capture.screenshotUrl);
+    }
+  }
+
+  return loadCaptureImage(capture?.screenshotUrl);
+}
+
 async function drawExportFrames(
   context: CanvasRenderingContext2D,
   result: PitchResponse,
   duration: number,
-  captureImage?: CanvasImageSource,
+  captureMedia?: CanvasImageSource,
 ) {
+  const captureVideo = captureMedia instanceof HTMLVideoElement ? captureMedia : undefined;
+  if (captureVideo) {
+    captureVideo.currentTime = 0;
+    await captureVideo.play().catch(() => undefined);
+  }
   const startedAt = performance.now();
   await new Promise<void>((resolve) => {
     const draw = (now: number) => {
       const elapsed = Math.min(duration, (now - startedAt) / 1000);
-      drawPitchFrame(context, result.pitch, elapsed, captureImage);
+      drawPitchFrame(context, result.pitch, elapsed, captureMedia);
       if (elapsed >= duration) resolve();
       else requestAnimationFrame(draw);
     };
     requestAnimationFrame(draw);
   });
+  captureVideo?.pause();
 }
 
 function pickRecordingMimeType() {
@@ -760,4 +818,9 @@ function formatTime(value: number) {
     .toString()
     .padStart(2, "0");
   return `${minutes}:${seconds}`;
+}
+
+function formatDuration(value: number) {
+  if (value < 60) return `${value}s`;
+  return `${Math.floor(value / 60)}m ${String(value % 60).padStart(2, "0")}s`;
 }

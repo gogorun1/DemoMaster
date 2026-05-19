@@ -5,6 +5,7 @@ import type {
   AgentLogEntry,
   AudioResult,
   DemoCapturePlan,
+  DemoCaptureResult,
   PitchPlan,
   PitchRequest,
   PitchScene,
@@ -57,16 +58,26 @@ interface QualityReview {
   fixes: string[];
 }
 
+interface CaptureAlignedPitch {
+  corePromise?: string;
+  positioning?: string;
+  cta?: string;
+  insights?: string[];
+  scenes: Array<Partial<PitchScene>>;
+}
+
 interface AgentRunResult {
   pitch: PitchPlan;
   agentLogs: AgentLog[];
 }
 
+type AgentLogSink = (log: AgentLog) => void | Promise<void>;
+
 const VISUALS: VisualMode[] = ["presenter", "problem", "product", "workflow", "evidence", "close"];
 const DEFAULT_AGENT_TIMEOUT_MS = 25000;
 const DEFAULT_TTS_TIMEOUT_MS = 45000;
 
-export async function generatePitchWithAgents(request: PitchRequest, repo: RepoContext): Promise<AgentRunResult> {
+export async function generatePitchWithAgents(request: PitchRequest, repo: RepoContext, onAgentLog?: AgentLogSink): Promise<AgentRunResult> {
   const client = getGeminiClient();
   if (!client) {
     return {
@@ -80,7 +91,7 @@ export async function generatePitchWithAgents(request: PitchRequest, repo: RepoC
 
   try {
     const analysis = await runRepoForensics(client, model, request, repo);
-    logs.push({
+    const repoForensicsLog: AgentLog = {
       agent: "Repo Forensics Agent",
       provider: "gemini",
       model,
@@ -92,10 +103,12 @@ export async function generatePitchWithAgents(request: PitchRequest, repo: RepoC
           message: `${analysis.productName}: ${analysis.evidence.slice(0, 3).join(" ")}`,
         },
       ],
-    });
+    };
+    logs.push(repoForensicsLog);
+    await emitAgentLog(onAgentLog, repoForensicsLog);
 
     const strategy = await runPitchStrategy(client, model, request, repo, analysis);
-    logs.push({
+    const pitchStrategyLog: AgentLog = {
       agent: "Pitch Strategy Agent",
       provider: "gemini",
       model,
@@ -111,10 +124,12 @@ export async function generatePitchWithAgents(request: PitchRequest, repo: RepoC
           message: strategy.experienceFlow.slice(0, 4).join(" -> "),
         },
       ],
-    });
+    };
+    logs.push(pitchStrategyLog);
+    await emitAgentLog(onAgentLog, pitchStrategyLog);
 
     const draft = await runCreativeDirector(client, model, request, repo, analysis, strategy);
-    logs.push({
+    const creativeDirectorLog: AgentLog = {
       agent: "Creative Director Agent",
       provider: "gemini",
       model,
@@ -130,9 +145,11 @@ export async function generatePitchWithAgents(request: PitchRequest, repo: RepoC
           message: draft.productReport.whyThisFlowWorks,
         },
       ],
-    });
+    };
+    logs.push(creativeDirectorLog);
+    await emitAgentLog(onAgentLog, creativeDirectorLog);
 
-    logs.push({
+    const demoCaptureLog: AgentLog = {
       agent: "Demo Capture Agent",
       provider: "gemini",
       model,
@@ -140,23 +157,27 @@ export async function generatePitchWithAgents(request: PitchRequest, repo: RepoC
         {
           step: "Plan repo run",
           status: "done",
-          message: draft.capturePlan?.message || "Prepared a Vultr runner plan for cloning, running, and capturing the repository.",
+          message: draft.capturePlan?.message || "Prepared a browser capture plan for hosted URL or local runner recording.",
         },
         {
-          step: "Prepare Vultr provisioning",
+          step: "Prepare browser capture",
           status: "done",
           message: `${draft.capturePlan?.installCommand || "auto install"} -> ${draft.capturePlan?.runCommand || "auto run"}`,
         },
       ],
-    });
+    };
+    logs.push(demoCaptureLog);
+    await emitAgentLog(onAgentLog, demoCaptureLog);
 
     const openModelCritic = await runFeatherlessCriticAgent(draft, analysis, strategy);
     logs.push(openModelCritic.log);
+    await emitAgentLog(onAgentLog, openModelCritic.log);
 
     const judge = await runQualityJudge(client, model, draft, analysis, strategy).catch((error) =>
       localQualityJudge(error, model, draft),
     );
     logs.push(judge.log);
+    await emitAgentLog(onAgentLog, judge.log);
 
     const pitch = normalizePitchPlan(draft, request, repo, analysis, mergeQualityReviews(judge.review, openModelCritic.review));
     return { pitch, agentLogs: logs };
@@ -186,6 +207,11 @@ export async function generatePitchWithAgents(request: PitchRequest, repo: RepoC
       ],
     };
   }
+}
+
+async function emitAgentLog(onAgentLog: AgentLogSink | undefined, log: AgentLog) {
+  if (!onAgentLog) return;
+  await onAgentLog(log);
 }
 
 export async function generateNarrationAudio(plan: PitchPlan): Promise<AudioResult> {
@@ -249,6 +275,109 @@ export async function generateNarrationAudio(plan: PitchPlan): Promise<AudioResu
       status: "error",
       provider: "gemini",
       message: friendlyProviderError(error, "Gemini narration failed."),
+    };
+  }
+}
+
+export async function alignPitchWithCapture(
+  plan: PitchPlan,
+  capture: DemoCaptureResult,
+  requestUrl: string,
+): Promise<{ pitch: PitchPlan; agentLog: AgentLog }> {
+  const client = getGeminiClient();
+  if (!client || capture.status !== "ready" || !capture.screenshotUrl) {
+    return {
+      pitch: plan,
+      agentLog: {
+        agent: "Capture Alignment Agent",
+        provider: "gemini",
+        entries: [
+          {
+            step: "Check capture material",
+            status: "skipped",
+            message: capture.screenshotUrl
+              ? "Capture alignment skipped because Gemini is not configured."
+              : "Capture alignment skipped because no completed capture screenshot was available.",
+          },
+        ],
+      },
+    };
+  }
+
+  try {
+    const model = process.env.GEMINI_REASONING_MODEL || "gemini-3-flash-preview";
+    const imagePart = await screenshotPart(capture.screenshotUrl, requestUrl);
+    const prompt = [
+      "You are the Capture Alignment Agent inside DemoMaster.",
+      "Rewrite the final pitch script so it corresponds to the actual captured product footage.",
+      "The attached image is a representative frame from the browser recording. The final export will place this captured footage in product/workflow/evidence scenes.",
+      "Rules:",
+      "- Keep the same number of scenes and roughly the same durations.",
+      "- Do not invent UI features that are not visible in the capture or grounded by the existing script.",
+      "- At least three scenes should explicitly match the captured app surface, layout, interaction, or output state.",
+      "- Keep the script concise and high-quality; this is still a product pitch, not a literal screen reader.",
+      "- Return strict JSON only with keys corePromise, positioning, cta, insights, scenes.",
+      "",
+      `Capture target URL: ${capture.targetUrl || "unknown"}`,
+      `Capture status message: ${capture.message}`,
+      `Existing pitch:\n${JSON.stringify(plan, null, 2)}`,
+    ].join("\n");
+
+    const response = await withTimeout(
+      client.models.generateContent({
+        model,
+        contents: [
+          {
+            role: "user",
+            parts: [{ text: prompt }, imagePart],
+          },
+        ],
+        config: {
+          temperature: 0.28,
+          maxOutputTokens: 8192,
+          responseMimeType: "application/json",
+          responseSchema: captureAlignedPitchSchema,
+        } as unknown as Record<string, unknown>,
+      }),
+      Number(process.env.GEMINI_CAPTURE_ALIGN_TIMEOUT_MS || 45000),
+      `Gemini capture alignment timed out on ${model}.`,
+    );
+    const aligned = parseJson(response.text ?? "{}") as CaptureAlignedPitch;
+    const pitch = normalizeCaptureAlignedPitch(plan, aligned);
+    return {
+      pitch,
+      agentLog: {
+        agent: "Capture Alignment Agent",
+        provider: "gemini",
+        model,
+        entries: [
+          {
+            step: "Inspect captured footage",
+            status: "done",
+            message: "Read the capture screenshot and recording metadata before finalizing the script.",
+          },
+          {
+            step: "Rewrite final script",
+            status: "done",
+            message: "Updated narration and captions so product/workflow/evidence scenes correspond to the captured UI.",
+          },
+        ],
+      },
+    };
+  } catch (error) {
+    return {
+      pitch: plan,
+      agentLog: {
+        agent: "Capture Alignment Agent",
+        provider: "gemini",
+        entries: [
+          {
+            step: "Align script with capture",
+            status: "error",
+            message: friendlyProviderError(error, "Capture alignment failed; kept the original script."),
+          },
+        ],
+      },
     };
   }
 }
@@ -333,8 +462,8 @@ async function runCreativeDirector(
         "Include a presenter-style scene that can look like a person speaking to camera.",
         "Keep total duration between 45 and 70 seconds.",
         "Also produce a product/UX report explaining why this product and flow make sense.",
-        "Also produce a demo capture plan for running the input repository on Vultr and recording real browser footage.",
-        "If the repository has a homepage, use it as a fallback capture target, but still describe the Vultr run path.",
+        "Also produce a demo capture plan that tries a public hosted demo URL first, then a temporary local runner if needed.",
+        "If the repository has a homepage or hosted demo link, use it as the fastest capture target.",
       ],
     )}\n\nAnalysis:\n${JSON.stringify(analysis, null, 2)}\n\nStrategy:\n${JSON.stringify(strategy, null, 2)}`,
     pitchDraftSchema,
@@ -579,9 +708,9 @@ function buildAgentPrompt(agentName: string, request: PitchRequest, repo: RepoCo
     "Product context:",
     "- DemoMaster converts one demo repository URL into a narrated product pitch video.",
     "- The pitch output must describe the input repository's product, not DemoMaster itself.",
-    "- A production-grade pitch should include real footage from the repo running in a sandbox, captured through a browser automation layer.",
+    "- A production-grade pitch should include real footage from a hosted demo URL or from the repo running in a temporary local runner.",
     "- The target hackathon is AI Agent Olympics at Milan AI Week.",
-    "- The stack should emphasize Google Gemini; Featherless is optional for critique; Speechmatics is optional for future voice input; Vultr is deployment infrastructure.",
+    "- The stack should emphasize Google Gemini; Featherless is optional for critique; Speechmatics verifies generated narration; Playwright records browser footage.",
     "- Do not use an external video database or reference-video input.",
     "",
     "Instructions:",
@@ -657,6 +786,38 @@ function normalizePitchPlan(
   };
 }
 
+function normalizeCaptureAlignedPitch(plan: PitchPlan, aligned: CaptureAlignedPitch): PitchPlan {
+  let cursor = 0;
+  const scenes = plan.scenes.map((scene, index) => {
+    const next = aligned.scenes?.[index];
+    const visual = next?.visual && VISUALS.includes(next.visual) ? next.visual : scene.visual;
+    const duration = clamp(Number(next?.duration) || scene.duration, 7, 16);
+    const normalized = {
+      ...scene,
+      title: cleanString(next?.title) || scene.title,
+      beat: cleanString(next?.beat) || scene.beat,
+      narration: cleanString(next?.narration) || scene.narration,
+      onScreenText: cleanString(next?.onScreenText) || scene.onScreenText,
+      visual,
+      duration,
+      start: cursor,
+    };
+    cursor += duration;
+    return normalized;
+  });
+
+  return {
+    ...plan,
+    corePromise: cleanString(aligned.corePromise) || plan.corePromise,
+    positioning: cleanString(aligned.positioning) || plan.positioning,
+    cta: cleanString(aligned.cta) || plan.cta,
+    insights: cleanStringArray(aligned.insights).length ? cleanStringArray(aligned.insights).slice(0, 6) : plan.insights,
+    scenes,
+    narration: scenes.map((scene) => scene.narration).join(" "),
+    generatedAt: new Date().toISOString(),
+  };
+}
+
 function normalizeCapturePlan(
   plan: DemoCapturePlan | undefined,
   fallback: DemoCapturePlan,
@@ -674,7 +835,7 @@ function normalizeCapturePlan(
     : fallback.steps;
 
   return {
-    source: plan?.source === "homepage" && (plan.targetUrl || repo.homepage) ? "homepage" : "vultr-runner",
+    source: plan?.source === "public-url" && (plan.targetUrl || repo.homepage) ? "public-url" : "local-runner",
     targetUrl: cleanString(plan?.targetUrl) || repo.homepage || fallback.targetUrl,
     installCommand: cleanString(plan?.installCommand) || fallback.installCommand,
     runCommand: cleanString(plan?.runCommand) || fallback.runCommand,
@@ -682,7 +843,7 @@ function normalizeCapturePlan(
     steps,
     message:
       cleanString(plan?.message) ||
-      "Vultr runner will clone the repo, install dependencies, start the app, and capture real browser footage.",
+      "DemoMaster will capture a hosted demo URL first, then clone and run the repo locally if needed.",
   };
 }
 
@@ -762,6 +923,20 @@ function cleanStringArray(value: unknown) {
   return Array.isArray(value)
     ? value.map((item) => cleanString(item)).filter(Boolean)
     : [];
+}
+
+async function screenshotPart(url: string, requestUrl: string) {
+  const absoluteUrl = new URL(url, requestUrl).toString();
+  const response = await fetch(absoluteUrl, { cache: "no-store" });
+  if (!response.ok) throw new Error(`Could not read capture screenshot: ${response.status}`);
+  const contentType = response.headers.get("content-type") || "image/png";
+  const data = Buffer.from(await response.arrayBuffer()).toString("base64");
+  return {
+    inlineData: {
+      mimeType: contentType,
+      data,
+    },
+  };
 }
 
 function clamp(value: number, min: number, max: number) {
@@ -927,7 +1102,7 @@ const pitchDraftSchema = {
     capturePlan: {
       type: "object",
       properties: {
-        source: { type: "string", enum: ["homepage", "vultr-runner"] },
+        source: { type: "string", enum: ["public-url", "local-runner"] },
         targetUrl: { type: "string" },
         installCommand: { type: "string" },
         runCommand: { type: "string" },
@@ -952,6 +1127,35 @@ const pitchDraftSchema = {
     "productReport",
     "capturePlan",
   ],
+};
+
+const captureAlignedPitchSchema = {
+  type: "object",
+  properties: {
+    corePromise: { type: "string" },
+    positioning: { type: "string" },
+    cta: { type: "string" },
+    insights: { type: "array", items: { type: "string" }, minItems: 3, maxItems: 6 },
+    scenes: {
+      type: "array",
+      minItems: 5,
+      maxItems: 6,
+      items: {
+        type: "object",
+        properties: {
+          id: { type: "string" },
+          title: { type: "string" },
+          beat: { type: "string" },
+          narration: { type: "string" },
+          onScreenText: { type: "string" },
+          visual: { type: "string", enum: VISUALS },
+          duration: { type: "integer", minimum: 7, maximum: 16 },
+        },
+        required: ["title", "beat", "narration", "onScreenText", "visual", "duration"],
+      },
+    },
+  },
+  required: ["corePromise", "positioning", "cta", "insights", "scenes"],
 };
 
 const qualityReviewSchema = {

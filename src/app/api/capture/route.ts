@@ -1,20 +1,19 @@
 import { NextResponse } from "next/server";
-import { startVultrRunner } from "@/lib/vultr-runner";
+import { runBrowserCapture } from "@/lib/capture-runner";
 import type { DemoCapturePlan } from "@/lib/types";
 
 export const runtime = "nodejs";
-export const maxDuration = 60;
+export const maxDuration = 300;
 
 export async function POST(request: Request) {
   try {
     const payload = (await request.json()) as { repoUrl?: string; capturePlan?: DemoCapturePlan };
     if (!payload.repoUrl?.trim()) throw new Error("Repository URL is required.");
     if (!payload.capturePlan) throw new Error("Capture plan is required.");
-    const result = await startVultrRunner(payload.repoUrl.trim(), payload.capturePlan);
-    return NextResponse.json(result);
+    return NextResponse.json(await runBrowserCapture(payload.repoUrl.trim(), payload.capturePlan));
   } catch (error) {
     return NextResponse.json(
-      { error: error instanceof Error ? error.message : "Could not start Vultr runner." },
+      { error: error instanceof Error ? error.message : "Could not capture demo." },
       { status: 400 },
     );
   }

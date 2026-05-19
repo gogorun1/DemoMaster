@@ -39,7 +39,7 @@ export interface ProductReport {
 }
 
 export interface PartnerCapability {
-  name: "Google Gemini" | "Featherless" | "Speechmatics" | "Vultr";
+  name: "Google Gemini" | "Featherless" | "Speechmatics" | "Playwright";
   role: string;
   status: "ready" | "optional" | "skipped";
   detail: string;
@@ -52,7 +52,7 @@ export interface DemoCaptureStep {
 }
 
 export interface DemoCapturePlan {
-  source: "homepage" | "vultr-runner";
+  source: "public-url" | "local-runner";
   targetUrl?: string;
   installCommand: string;
   runCommand: string;
@@ -62,11 +62,10 @@ export interface DemoCapturePlan {
 }
 
 export interface DemoCaptureResult {
-  status: "ready" | "running" | "skipped" | "error" | "destroyed";
-  provider: "vultr";
-  instanceId?: string;
+  status: "ready" | "running" | "skipped" | "error";
+  provider: "public-url" | "local-runner";
+  runId?: string;
   targetUrl?: string;
-  statusUrl?: string;
   screenshotUrl?: string;
   videoUrl?: string;
   message: string;
@@ -86,6 +85,8 @@ export type AgentName =
   | "Open Model Critic Agent"
   | "Quality Judge Agent"
   | "Demo Capture Agent"
+  | "Browser Capture Agent"
+  | "Capture Alignment Agent"
   | "Voice QA Agent"
   | "Media Renderer Agent";
 

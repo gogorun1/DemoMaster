@@ -126,7 +126,7 @@ export function fallbackPitchPlan(request: PitchRequest, repo: RepoContext): Pit
     },
     partnerStack: buildPartnerStack(Boolean(process.env.GEMINI_API_KEY)),
     capturePlan: {
-      source: repo.homepage ? "homepage" : "vultr-runner",
+      source: repo.homepage ? "public-url" : "local-runner",
       targetUrl: repo.homepage || undefined,
       installCommand: "auto-detect package manager and install dependencies",
       runCommand: "auto-detect dev/start script and bind to 0.0.0.0",
@@ -149,8 +149,8 @@ export function fallbackPitchPlan(request: PitchRequest, repo: RepoContext): Pit
         },
       ],
       message: repo.homepage
-        ? "Use the public homepage as an immediate capture target; Vultr runner can still attempt a fresh repo run."
-        : "Provision a Vultr runner to clone, install, run, and capture the repository.",
+        ? "Use the public homepage as the fastest capture target; local runner remains available if the public URL fails."
+        : "Clone the repo into a temporary local runner, install dependencies, start the app, and capture browser footage.",
     },
     generatedAt: new Date().toISOString(),
   };
@@ -203,7 +203,7 @@ export function fallbackAgentLogs(repo: RepoContext): AgentLog[] {
           status: "done",
           message: repo.homepage
             ? `Homepage capture target detected: ${repo.homepage}.`
-            : "No homepage detected; Vultr runner will attempt to run the repo from source.",
+            : "No homepage detected; local runner will attempt to run the repo from source.",
         },
       ],
     },
@@ -261,10 +261,10 @@ export function buildPartnerStack(hasGemini: boolean): PartnerCapability[] {
         : "Optional. Add SPEECHMATICS_API_KEY to verify narration audio against the transcript.",
     },
     {
-      name: "Vultr",
-      role: "deployment target for the hackathon demo",
-      status: process.env.VULTR_API_KEY ? "ready" : "optional",
-      detail: "The app remains portable to Vultr; runtime does not require Vultr credentials locally.",
+      name: "Playwright",
+      role: "public URL and local browser capture",
+      status: "ready",
+      detail: "Used to record hosted demo URLs or temporary local runner sessions without remote infrastructure provisioning.",
     },
   ];
 }
