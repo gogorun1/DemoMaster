@@ -2,37 +2,32 @@
 
 import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import {
+  Brain,
+  CheckCircle2,
   Code2,
   Download,
-  Film,
+  FileText,
   Loader2,
   Mic2,
   Pause,
   Play,
   RefreshCcw,
   Sparkles,
-  WandSparkles,
+  Trophy,
 } from "lucide-react";
 import { VideoCanvas } from "@/components/VideoCanvas";
 import { drawPitchFrame, getTotalDuration } from "@/lib/render-frame";
-import type { PitchRequest, PitchResponse, PitchStyle } from "@/lib/types";
+import type { AgentLogEntry, PitchResponse } from "@/lib/types";
 
-const sampleRequest: PitchRequest = {
-  repoUrl: "https://github.com/gogorun1/DemoMaster",
-  productHint: "DemoMaster",
-  audience: "hackathon judges, founders, and product teams",
-  style: "launch",
-  includeVoice: true,
-};
+const sampleRepo = "https://github.com/vercel/ai-chatbot";
 
 export function PitchWorkbench() {
-  const [form, setForm] = useState<PitchRequest>(sampleRequest);
+  const [repoUrl, setRepoUrl] = useState(sampleRepo);
   const [result, setResult] = useState<PitchResponse | null>(null);
   const [currentTime, setCurrentTime] = useState(0);
   const [isGenerating, setIsGenerating] = useState(false);
   const [isPlaying, setIsPlaying] = useState(false);
   const [isExporting, setIsExporting] = useState(false);
-  const [isFinalizing, setIsFinalizing] = useState(false);
   const [error, setError] = useState("");
   const [exportUrl, setExportUrl] = useState("");
   const audioRef = useRef<HTMLAudioElement>(null);
@@ -73,7 +68,7 @@ export function PitchWorkbench() {
       const response = await fetch("/api/pitch", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(form),
+        body: JSON.stringify({ repoUrl }),
       });
       const body = await response.json();
       if (!response.ok) throw new Error(body.error || "Generation failed.");
@@ -96,7 +91,7 @@ export function PitchWorkbench() {
     }
 
     if (audio && result.audio.status === "ready") {
-      audio.currentTime = Math.min(currentTime, Math.max(0, audio.duration - 0.2));
+      audio.currentTime = Math.min(currentTime, Math.max(0, (audio.duration || totalDuration) - 0.2));
       await audio.play();
     }
     setIsPlaying(true);
@@ -133,9 +128,7 @@ export function PitchWorkbench() {
         source = audioContext.createBufferSource();
         source.buffer = audioBuffer;
         source.connect(destination);
-        for (const track of destination.stream.getAudioTracks()) {
-          stream.addTrack(track);
-        }
+        for (const track of destination.stream.getAudioTracks()) stream.addTrack(track);
       }
 
       const chunks: BlobPart[] = [];
@@ -164,129 +157,122 @@ export function PitchWorkbench() {
     }
   }
 
-  async function finalizeVideoDbStream() {
-    if (!result?.pitch.videoDbMedia?.assets.length) return;
-    setIsFinalizing(true);
-    setError("");
-    try {
-      const response = await fetch("/api/videodb/finalize", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ assets: result.pitch.videoDbMedia.assets }),
-      });
-      const body = await response.json();
-      if (!response.ok) throw new Error(body.error || "VideoDB finalize failed.");
-      setResult({
-        ...result,
-        pitch: { ...result.pitch, videoDbMedia: body.videoDbMedia },
-        agentLogs: result.agentLogs.map((log) =>
-          log.agent === "VideoDB Media Director Agent" ? { ...log, entries: body.videoDbMedia.logs } : log,
-        ),
-      });
-    } catch (finalizeError) {
-      setError(finalizeError instanceof Error ? finalizeError.message : "VideoDB finalize failed.");
-    } finally {
-      setIsFinalizing(false);
-    }
-  }
+  const heroStatus = isGenerating ? "Agents running" : result?.pitch.mode === "agentic" ? "Pitch ready" : result ? "Fallback ready" : "Ready";
 
   return (
     <main className="app-shell">
+      <section className="topbar">
+        <div className="brand-lockup">
+          <div className="mark">
+            <Trophy size={20} />
+          </div>
+          <div>
+            <h1>DemoMaster</h1>
+            <p>AI Agent Olympics repo-to-pitch studio</p>
+          </div>
+        </div>
+        <span className="status-pill">
+          <span className={isGenerating ? "status-dot pulse" : result?.pitch.mode === "fallback" ? "status-dot fallback" : "status-dot"} />
+          {heroStatus}
+        </span>
+      </section>
+
       <div className="workspace">
         <aside className="sidebar">
-          <div className="brand-bar">
-            <div className="brand-title">
-              <div className="mark">
-                <Film size={20} />
-              </div>
-              <div>
-                <h1>DemoMaster</h1>
-                <p>Repo to narrated pitch video</p>
-              </div>
-            </div>
-            <span className="status-pill">
-              <span className="status-dot" />
-              Studio
-            </span>
-          </div>
-
-          <form className="form" onSubmit={handleSubmit}>
+          <form className="repo-form" onSubmit={handleSubmit}>
             <label className="field">
-              <span>Demo repo</span>
+              <span>Repository</span>
               <input
-                value={form.repoUrl}
-                onChange={(event) => setForm({ ...form, repoUrl: event.target.value })}
+                value={repoUrl}
+                onChange={(event) => setRepoUrl(event.target.value)}
                 placeholder="https://github.com/org/repo"
+                spellCheck={false}
               />
             </label>
-
-            <label className="field">
-              <span>Product hint</span>
-              <input
-                value={form.productHint}
-                onChange={(event) => setForm({ ...form, productHint: event.target.value })}
-                placeholder="Product name"
-              />
-            </label>
-
-            <label className="field">
-              <span>Audience</span>
-              <textarea
-                value={form.audience}
-                onChange={(event) => setForm({ ...form, audience: event.target.value })}
-                placeholder="judges, founders, buyers..."
-              />
-            </label>
-
-            <div className="field-row">
-              <label className="field">
-                <span>Pitch style</span>
-                <select
-                  value={form.style}
-                  onChange={(event) => setForm({ ...form, style: event.target.value as PitchStyle })}
-                >
-                  <option value="launch">Launch</option>
-                  <option value="investor">Investor</option>
-                  <option value="sales">Sales</option>
-                  <option value="devrel">DevRel</option>
-                </select>
-              </label>
-
-              <label className="field">
-                <span>Preview audio</span>
-                <select
-                  value={form.includeVoice ? "yes" : "no"}
-                  onChange={(event) => setForm({ ...form, includeVoice: event.target.value === "yes" })}
-                >
-                  <option value="yes">On</option>
-                  <option value="no">Silent preview</option>
-                </select>
-              </label>
-            </div>
 
             <div className="button-row">
               <button className="btn primary" type="submit" disabled={isGenerating}>
-                {isGenerating ? <Loader2 size={17} className="spin" /> : <WandSparkles size={17} />}
-                Generate
+                {isGenerating ? <Loader2 size={17} className="spin" /> : <Sparkles size={17} />}
+                Generate pitch video
               </button>
-              <button className="btn ghost" type="button" onClick={() => setForm(sampleRequest)}>
-                <RefreshCcw size={16} />
-                Sample
+              <button className="icon-btn" type="button" onClick={() => setRepoUrl(sampleRepo)} title="Use sample repo">
+                <RefreshCcw size={17} />
               </button>
             </div>
 
-            {error ? <div className="notice">{error}</div> : null}
+            {error ? <div className="notice error">{error}</div> : null}
             {result?.warnings.length ? <div className="notice">{result.warnings.join(" ")}</div> : null}
           </form>
+
+          <section className="panel compact">
+            <div className="panel-heading">
+              <Brain size={18} />
+              <h2>Agent run</h2>
+            </div>
+            {isGenerating ? (
+              <ul className="run-list">
+                {["Inspect repo", "Design product flow", "Write pitch", "Judge quality", "Render voice"].map((step) => (
+                  <li key={step}>
+                    <Loader2 size={14} className="spin" />
+                    <span>{step}</span>
+                  </li>
+                ))}
+              </ul>
+            ) : result ? (
+              <ul className="run-list">
+                {result.agentLogs.map((log) => (
+                  <li key={log.agent}>
+                    <CheckCircle2 size={14} />
+                    <span>{log.agent}</span>
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <p className="muted-copy">Gemini agents will inspect, position, script, judge, and render from the repository.</p>
+            )}
+          </section>
+
+          {result ? (
+            <section className="panel compact">
+              <div className="panel-heading">
+                <Code2 size={18} />
+                <h2>Partner stack</h2>
+              </div>
+              <ul className="stack-list">
+                {result.pitch.partnerStack.map((partner) => (
+                  <li key={partner.name}>
+                    <span className={`small-status ${partner.status}`}>{partner.status}</span>
+                    <div>
+                      <strong>{partner.name}</strong>
+                      <p>{partner.role}</p>
+                      <small>{partner.detail}</small>
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            </section>
+          ) : null}
         </aside>
 
         <section className="main">
           {result ? (
             <>
               <section className="stage">
+                <div className="stage-meta">
+                  <div>
+                    <span className="eyebrow">
+                      {result.pitch.productName} · {result.pitch.mode === "agentic" ? "Agentic run" : "Fallback run"}
+                    </span>
+                    <h2>{result.pitch.corePromise}</h2>
+                    <p>{result.pitch.positioning}</p>
+                  </div>
+                  <div className="score">{result.pitch.score}</div>
+                </div>
+
                 <div className="canvas-wrap">
                   <VideoCanvas plan={result.pitch} currentTime={currentTime} />
                 </div>
+
                 <div className="stage-controls">
                   <div className="button-row">
                     <button className="btn primary" type="button" onClick={togglePlayback}>
@@ -311,126 +297,75 @@ export function PitchWorkbench() {
                     <span className="timecode">{formatTime(totalDuration)}</span>
                   </div>
                 </div>
+
                 {result.audio.dataUrl ? <audio ref={audioRef} src={result.audio.dataUrl} preload="auto" /> : null}
                 {exportUrl ? (
-                  <p>
-                    <a className="export-link" href={exportUrl} download={`${result.pitch.productName}-pitch.webm`}>
-                      Download exported video
-                    </a>
-                  </p>
+                  <a className="export-link" href={exportUrl} download={`${result.pitch.productName}-pitch.webm`}>
+                    Download exported video
+                  </a>
                 ) : null}
               </section>
 
               <section className="output-grid">
-                <div className="panel">
-                  <div className="panel-title">
-                    <div>
-                      <h2>{result.pitch.corePromise}</h2>
-                      <p>{result.pitch.positioning}</p>
-                    </div>
-                    <div className="score">{result.pitch.score}</div>
+                <section className="panel">
+                  <div className="panel-heading">
+                    <FileText size={18} />
+                    <h2>Product report</h2>
                   </div>
-                  <ul className="insight-list">
-                    {result.pitch.insights.map((insight) => (
-                      <li key={insight}>{insight}</li>
-                    ))}
-                  </ul>
-                </div>
+                  <div className="report-block">
+                    <h3>User need</h3>
+                    <p>{result.pitch.productReport.userNeed}</p>
+                  </div>
+                  <div className="report-block">
+                    <h3>Product shape</h3>
+                    <p>{result.pitch.productReport.productShape}</p>
+                  </div>
+                  <div className="report-block">
+                    <h3>Why this flow works</h3>
+                    <p>{result.pitch.productReport.whyThisFlowWorks}</p>
+                  </div>
+                </section>
 
-                <div className="panel">
-                  <div className="panel-title">
-                    <div>
-                      <h2>Transcript</h2>
-                      <p>{result.pitch.narration}</p>
-                    </div>
-                    <Mic2 size={22} color="#83d17d" />
+                <section className="panel">
+                  <div className="panel-heading">
+                    <Mic2 size={18} />
+                    <h2>Transcript</h2>
                   </div>
+                  <p className="transcript">{result.pitch.narration}</p>
+                </section>
+              </section>
+
+              <section className="output-grid">
+                <FeatureList title="Core functions" items={result.pitch.productReport.coreFunctions} />
+                <FeatureList title="Supporting functions" items={result.pitch.productReport.supportingFunctions} />
+              </section>
+
+              <section className="panel">
+                <div className="panel-heading">
+                  <Sparkles size={18} />
+                  <h2>Agent logs</h2>
+                </div>
+                <div className="agent-grid">
+                  {result.agentLogs.map((log) => (
+                    <article className="agent-panel" key={log.agent}>
+                      <header>
+                        <strong>{log.agent}</strong>
+                        <span>{log.model || log.provider}</span>
+                      </header>
+                      <ul>
+                        {log.entries.map((entry) => (
+                          <LogEntry entry={entry} key={`${log.agent}-${entry.step}`} />
+                        ))}
+                      </ul>
+                    </article>
+                  ))}
                 </div>
               </section>
 
               <section className="panel">
-                <div className="panel-title">
-                  <div>
-                    <h2>VideoDB generated media</h2>
-                    <p>{result.pitch.videoDbMedia?.message || "VideoDB media generation is not configured."}</p>
-                  </div>
-                  <Film size={22} color="#7ed6bf" />
-                </div>
-                {result.pitch.videoDbMedia?.streamUrl ? (
-                  <p>
-                    <a className="export-link" href={result.pitch.videoDbMedia.streamUrl} target="_blank" rel="noreferrer">
-                      Open compiled VideoDB stream
-                    </a>
-                  </p>
-                ) : null}
-                {result.pitch.videoDbMedia?.assets.length && !result.pitch.videoDbMedia.streamUrl ? (
-                  <button className="btn" type="button" onClick={finalizeVideoDbStream} disabled={isFinalizing}>
-                    {isFinalizing ? <Loader2 size={17} className="spin" /> : <Film size={17} />}
-                    Finalize VideoDB stream
-                  </button>
-                ) : null}
-                <ul className="evidence-list">
-                  {result.pitch.videoDbMedia?.assets.length ? (
-                    result.pitch.videoDbMedia.assets.map((asset) => (
-                      <li className="evidence-item" key={`${asset.kind}-${asset.id || asset.prompt}`}>
-                        <h3>
-                          {asset.kind} · {asset.status}
-                        </h3>
-                        <p>{asset.prompt}</p>
-                        {asset.playerUrl || asset.streamUrl || asset.outputUrl ? (
-                          <p>
-                            <a
-                              className="export-link"
-                              href={asset.playerUrl || asset.streamUrl || asset.outputUrl}
-                              target="_blank"
-                              rel="noreferrer"
-                            >
-                              Open VideoDB asset
-                            </a>
-                          </p>
-                        ) : null}
-                      </li>
-                    ))
-                  ) : (
-                    <li className="evidence-item">
-                      <h3>skipped</h3>
-                      <p>Set VIDEODB_API_KEY to generate supporting video clips, voice narration, music, and a final timeline stream from the repo pitch.</p>
-                    </li>
-                  )}
-                </ul>
-              </section>
-
-              <section className="output-grid">
-                {(result.agentLogs || []).map((log) => (
-                  <div className="panel" key={log.agent}>
-                    <div className="panel-title">
-                      <div>
-                        <h2>{log.agent}</h2>
-                        <p>{log.entries[log.entries.length - 1]?.message}</p>
-                      </div>
-                      <Sparkles size={22} color="#f2c36b" />
-                    </div>
-                    <ul className="evidence-list">
-                      {log.entries.map((entry) => (
-                        <li className="evidence-item" key={`${log.agent}-${entry.step}`}>
-                          <h3>
-                            {entry.step} · {entry.status}
-                          </h3>
-                          <p>{entry.message}</p>
-                        </li>
-                      ))}
-                    </ul>
-                  </div>
-                ))}
-              </section>
-
-              <section className="timeline-panel">
-                <div className="panel-title">
-                  <div>
-                    <h2>Scene plan</h2>
-                    <p>{result.pitch.strategy}</p>
-                  </div>
-                  <Sparkles size={22} color="#f2c36b" />
+                <div className="panel-heading">
+                  <FileText size={18} />
+                  <h2>Scene plan</h2>
                 </div>
                 <ul className="scene-list">
                   {result.pitch.scenes.map((scene) => (
@@ -448,17 +383,46 @@ export function PitchWorkbench() {
           ) : (
             <section className="empty-state">
               <div>
-                <Code2 size={42} color="#83d17d" />
-                <h2>Turn a demo repo into a narrated pitch.</h2>
-                <p>
-                  Paste a repository and generate a timed product story with voice, transcript, and pitch-ready scenes.
-                </p>
+                <Code2 size={42} />
+                <h2>Repo in. Pitch video out.</h2>
+                <p>One repository URL starts the full agent run: understanding, positioning, scripting, judging, narration, and export.</p>
               </div>
             </section>
           )}
         </section>
       </div>
     </main>
+  );
+}
+
+function FeatureList({ title, items }: { title: string; items: Array<{ name: string; why: string }> }) {
+  return (
+    <section className="panel">
+      <div className="panel-heading">
+        <CheckCircle2 size={18} />
+        <h2>{title}</h2>
+      </div>
+      <ul className="feature-list">
+        {items.map((item) => (
+          <li key={item.name}>
+            <h3>{item.name}</h3>
+            <p>{item.why}</p>
+          </li>
+        ))}
+      </ul>
+    </section>
+  );
+}
+
+function LogEntry({ entry }: { entry: AgentLogEntry }) {
+  return (
+    <li>
+      <span className={`log-status ${entry.status}`}>{entry.status}</span>
+      <div>
+        <h3>{entry.step}</h3>
+        <p>{entry.message}</p>
+      </div>
+    </li>
   );
 }
 

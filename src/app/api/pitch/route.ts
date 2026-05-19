@@ -1,80 +1,53 @@
 import { NextResponse } from "next/server";
-import { generatePitchPlan, generatePreviewNarration } from "@/lib/gemini";
+import { generateNarrationAudio, generatePitchWithAgents } from "@/lib/gemini";
 import { loadRepoContext } from "@/lib/repo-context";
-import { generatePitchMediaAssets } from "@/lib/videodb";
-import type { AgentLog, PitchRequest, RepoContext } from "@/lib/types";
+import type { AgentLog, PitchRequest } from "@/lib/types";
 
 export const runtime = "nodejs";
-export const maxDuration = 120;
+export const maxDuration = 180;
 
 export async function POST(request: Request) {
   try {
     const payload = (await request.json()) as Partial<PitchRequest>;
     const input = sanitizeRequest(payload);
     const repo = await loadRepoContext(input.repoUrl);
-    const pitch = await generatePitchPlan(input, repo);
-    const videoDbMedia = await generatePitchMediaAssets(pitch);
-    const pitchWithMedia = { ...pitch, videoDbMedia };
-    const audio = await generatePreviewNarration(pitchWithMedia, input.includeVoice);
-    const warnings = [
+    const { pitch, agentLogs } = await generatePitchWithAgents(input, repo);
+    const audio = await generateNarrationAudio(pitch);
+    const warnings = Array.from(new Set([
       ...repo.warnings,
-      videoDbMedia.status === "error" ? videoDbMedia.message : "",
+      pitch.mode === "fallback" ? "Agentic generation degraded; returned the deterministic fallback pitch." : "",
       audio.status !== "ready" ? audio.message : "",
-    ].filter(Boolean);
-
-    const agentLogs: AgentLog[] = [
+    ].filter(Boolean)));
+    const fullLogs: AgentLog[] = [
+      ...agentLogs,
       {
-        agent: "Repo Strategist Agent",
+        agent: "Media Renderer Agent",
+        provider: "browser",
         entries: [
           {
-            step: "Inspect repository",
-            status: repo.source === "github" ? "done" : repo.source === "manual" ? "skipped" : "error",
-            message: repoSummary(repo),
-          },
-          {
-            step: "Generate pitch strategy",
-            status: "done",
-            message: `Created ${pitch.scenes.length} timed scene(s), transcript, and positioning for ${pitch.productName}.`,
-          },
-          {
-            step: "Generate browser preview narration",
+            step: "Generate narration",
             status: audio.status === "ready" ? "done" : audio.status,
             message: audio.message,
           },
+          {
+            step: "Prepare browser renderer",
+            status: "done",
+            message: "Prepared a timed canvas video that can be played and exported as WebM in the browser.",
+          },
         ],
-      },
-      {
-        agent: "VideoDB Media Director Agent",
-        entries: videoDbMedia.logs,
       },
     ];
 
-    return NextResponse.json({ repo, pitch: pitchWithMedia, audio, warnings, agentLogs });
+    return NextResponse.json({ repo, pitch, audio, warnings, agentLogs: fullLogs });
   } catch (error) {
     return NextResponse.json(
-      {
-        error: error instanceof Error ? error.message : "Could not generate pitch.",
-      },
+      { error: error instanceof Error ? error.message : "Could not generate pitch video." },
       { status: 400 },
     );
   }
 }
 
-function repoSummary(repo: RepoContext) {
-  if (repo.source !== "github") return repo.warnings[0] || "Repository was not inspected from GitHub.";
-  return `Loaded ${repo.files.length} high-signal file(s) from ${repo.owner}/${repo.repo} on ${repo.branch}.`;
-}
-
 function sanitizeRequest(payload: Partial<PitchRequest>): PitchRequest {
-  if (!payload.repoUrl?.trim()) {
-    throw new Error("A demo repository URL is required.");
-  }
-
-  return {
-    repoUrl: payload.repoUrl.trim(),
-    productHint: payload.productHint?.trim(),
-    audience: payload.audience?.trim() || "founders, judges, and product buyers",
-    style: payload.style || "launch",
-    includeVoice: payload.includeVoice ?? true,
-  };
+  if (!payload.repoUrl?.trim()) throw new Error("A GitHub repository URL is required.");
+  return { repoUrl: payload.repoUrl.trim() };
 }

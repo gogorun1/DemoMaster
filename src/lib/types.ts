@@ -1,13 +1,7 @@
-export type PitchStyle = "launch" | "investor" | "sales" | "devrel";
-
-export type VisualMode = "talkingHead" | "problem" | "solution" | "workflow" | "proof" | "cta";
+export type VisualMode = "presenter" | "problem" | "product" | "workflow" | "evidence" | "close";
 
 export interface PitchRequest {
   repoUrl: string;
-  productHint?: string;
-  audience: string;
-  style: PitchStyle;
-  includeVoice: boolean;
 }
 
 export interface RepoFileSummary {
@@ -29,24 +23,26 @@ export interface RepoContext {
   warnings: string[];
 }
 
-export interface VideoDbAsset {
-  kind: "video" | "voice" | "music";
-  prompt: string;
-  status: "processing" | "done" | "failed" | "error";
-  id?: string;
-  outputUrl?: string;
-  streamUrl?: string;
-  playerUrl?: string;
-  message?: string;
+export interface ProductFunction {
+  name: string;
+  why: string;
 }
 
-export interface VideoDbMedia {
-  status: "ready" | "skipped" | "error";
-  provider: "videodb";
-  assets: VideoDbAsset[];
-  streamUrl?: string;
-  message: string;
-  logs: AgentLogEntry[];
+export interface ProductReport {
+  userNeed: string;
+  productShape: string;
+  experienceFlow: string[];
+  coreFunctions: ProductFunction[];
+  supportingFunctions: ProductFunction[];
+  whyThisFlowWorks: string;
+  qualityBar: string[];
+}
+
+export interface PartnerCapability {
+  name: "Google Gemini" | "Featherless" | "Speechmatics" | "Vultr";
+  role: string;
+  status: "ready" | "optional" | "skipped";
+  detail: string;
 }
 
 export interface AgentLogEntry {
@@ -55,8 +51,17 @@ export interface AgentLogEntry {
   message: string;
 }
 
+export type AgentName =
+  | "Repo Forensics Agent"
+  | "Pitch Strategy Agent"
+  | "Creative Director Agent"
+  | "Quality Judge Agent"
+  | "Media Renderer Agent";
+
 export interface AgentLog {
-  agent: "Repo Strategist Agent" | "VideoDB Media Director Agent";
+  agent: AgentName;
+  provider: "gemini" | "featherless" | "browser";
+  model?: string;
   entries: AgentLogEntry[];
 }
 
@@ -72,9 +77,10 @@ export interface PitchScene {
 }
 
 export interface PitchPlan {
+  mode: "agentic" | "fallback";
   productName: string;
   tagline: string;
-  audience: string;
+  primaryUser: string;
   corePromise: string;
   positioning: string;
   strategy: string;
@@ -83,7 +89,8 @@ export interface PitchPlan {
   insights: string[];
   scenes: PitchScene[];
   narration: string;
-  videoDbMedia?: VideoDbMedia;
+  productReport: ProductReport;
+  partnerStack: PartnerCapability[];
   generatedAt: string;
 }
 
