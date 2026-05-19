@@ -128,24 +128,9 @@ export async function generatePitchWithAgents(request: PitchRequest, repo: RepoC
     logs.push(pitchStrategyLog);
     await emitAgentLog(onAgentLog, pitchStrategyLog);
 
-    const draft = await runCreativeDirector(client, model, request, repo, analysis, strategy);
-    const creativeDirectorLog: AgentLog = {
-      agent: "Creative Director Agent",
-      provider: "gemini",
-      model,
-      entries: [
-        {
-          step: "Write storyboard",
-          status: "done",
-          message: `Created ${draft.scenes.length} scenes with short captions, presenter moments, and an exportable narration script.`,
-        },
-        {
-          step: "Write product report",
-          status: "done",
-          message: draft.productReport.whyThisFlowWorks,
-        },
-      ],
-    };
+    const creative = await runCreativeDirectorWithRecovery(client, model, request, repo, analysis, strategy);
+    const draft = creative.draft;
+    const creativeDirectorLog = creative.log;
     logs.push(creativeDirectorLog);
     await emitAgentLog(onAgentLog, creativeDirectorLog);
 
@@ -315,11 +300,15 @@ export async function alignPitchWithCapture(
       "- Keep the same number of scenes and roughly the same durations.",
       "- Do not invent UI features that are not visible in the capture or grounded by the existing script.",
       "- At least three scenes should explicitly match the captured app surface, layout, interaction, or output state.",
+      "- Scene narration must follow the recorded interaction order when an interaction summary is provided.",
+      "- If the recording stops at a login, signup, pricing, or setup step, say that clearly instead of claiming the final generation completed.",
       "- Keep the script concise and high-quality; this is still a product pitch, not a literal screen reader.",
       "- Return strict JSON only with keys corePromise, positioning, cta, insights, scenes.",
       "",
       `Capture target URL: ${capture.targetUrl || "unknown"}`,
       `Capture status message: ${capture.message}`,
+      `Recorded interaction summary:\n${(capture.interactionSummary || []).map((step, index) => `${index + 1}. ${step}`).join("\n") || "No interaction summary was provided."}`,
+      `Browser capture agent logs:\n${(capture.logs || []).map((entry) => `- ${entry.status}: ${entry.step} — ${entry.message}`).join("\n") || "No capture logs were provided."}`,
       `Existing pitch:\n${JSON.stringify(plan, null, 2)}`,
     ].join("\n");
 
@@ -469,6 +458,61 @@ async function runCreativeDirector(
     pitchDraftSchema,
     Number(process.env.GEMINI_CREATIVE_TIMEOUT_MS || 45000),
   );
+}
+
+async function runCreativeDirectorWithRecovery(
+  client: GoogleGenAI,
+  model: string,
+  request: PitchRequest,
+  repo: RepoContext,
+  analysis: ProductAnalysis,
+  strategy: PitchStrategy,
+): Promise<{ draft: PitchDraft; log: AgentLog }> {
+  try {
+    const draft = await runCreativeDirector(client, model, request, repo, analysis, strategy);
+    return {
+      draft,
+      log: {
+        agent: "Creative Director Agent",
+        provider: "gemini",
+        model,
+        entries: [
+          {
+            step: "Write storyboard",
+            status: "done",
+            message: `Created ${draft.scenes.length} scenes with short captions, presenter moments, and an exportable narration script.`,
+          },
+          {
+            step: "Write product report",
+            status: "done",
+            message: draft.productReport.whyThisFlowWorks,
+          },
+        ],
+      },
+    };
+  } catch (error) {
+    const draft = localCreativeDraft(request, repo, analysis, strategy);
+    return {
+      draft,
+      log: {
+        agent: "Creative Director Agent",
+        provider: "gemini",
+        model,
+        entries: [
+          {
+            step: "Recover creative pass",
+            status: "error",
+            message: friendlyProviderError(error, "Creative Director model failed; rebuilt the storyboard from repo forensics and product strategy."),
+          },
+          {
+            step: "Write deterministic storyboard",
+            status: "done",
+            message: `Created ${draft.scenes.length} grounded scenes from the successful forensics and strategy agents.`,
+          },
+        ],
+      },
+    };
+  }
 }
 
 async function runQualityJudge(
@@ -632,6 +676,7 @@ async function runFeatherlessJudge(
         ],
       }),
       cache: "no-store",
+      signal: AbortSignal.timeout(Number(process.env.FEATHERLESS_TIMEOUT_MS || 20000)),
     });
     if (!response.ok) throw new Error(`${response.status} ${response.statusText}`);
     const payload = (await response.json()) as {
@@ -651,6 +696,161 @@ function mergeQualityReviews(primary: QualityReview, secondary?: QualityReview):
     verdict: `${primary.verdict} Open-model critique: ${secondary.verdict}`,
     issues: [...new Set([...primary.issues, ...secondary.issues])].slice(0, 6),
     fixes: [...new Set([...primary.fixes, ...secondary.fixes])].slice(0, 8),
+  };
+}
+
+function localCreativeDraft(
+  request: PitchRequest,
+  repo: RepoContext,
+  analysis: ProductAnalysis,
+  strategy: PitchStrategy,
+): PitchDraft {
+  const productName = cleanString(analysis.productName) || repo.repo || "Demo";
+  const corePromise = cleanString(strategy.corePromise) || cleanString(analysis.userNeed) || "Turn a repository into a clear product demo.";
+  const positioning = cleanString(strategy.positioning) || `${productName} turns code evidence into a judge-ready product story.`;
+  const flow = cleanStringArray(strategy.experienceFlow);
+  const evidence = cleanStringArray(analysis.evidence);
+  const coreFunctions = strategy.coreFunctions?.length ? strategy.coreFunctions : [
+    { name: "Repository inspection", why: "The product starts from the real codebase instead of a hand-written brief." },
+    { name: "Agentic pitch planning", why: "Separate agents turn evidence into positioning, storyboard, and quality checks." },
+    { name: "Browser capture", why: "The final video can show the product running, not only a static script." },
+  ];
+  const supportingFunctions = strategy.supportingFunctions?.length ? strategy.supportingFunctions : [
+    { name: "Narration generation", why: "A pitch video needs a clear spoken track, not just slides." },
+    { name: "Transcript and QA", why: "The user can inspect what was said and whether the voice matches the script." },
+  ];
+  const scenes: PitchScene[] = [
+    {
+      id: "scene-1",
+      title: "One Repo, One Pitch",
+      beat: "Presenter opens with the user problem and the single-input promise.",
+      narration: `${productName} starts with a simple idea: a GitHub repo should be enough to explain what a product does, why it matters, and how it works.`,
+      onScreenText: "Repo in. Pitch video out.",
+      visual: "presenter",
+      duration: 8,
+      start: 0,
+    },
+    {
+      id: "scene-2",
+      title: "The Gap",
+      beat: "Name the workflow pain this product removes.",
+      narration: `Teams already have the truth in their code, but turning that truth into a polished demo still takes reading, scripting, recording, and editing by hand.`,
+      onScreenText: "The demo work is still manual",
+      visual: "problem",
+      duration: 9,
+      start: 8,
+    },
+    {
+      id: "scene-3",
+      title: "Agent Workflow",
+      beat: "Show the multi-agent pipeline as the product experience.",
+      narration: flow.length
+        ? `The workflow is agentic: ${flow.slice(0, 3).join(", ").toLowerCase()}, then a final pitch is assembled with narration and footage.`
+        : `The workflow is agentic: inspect the repo, define the product story, capture the running app, then assemble the final narrated pitch.`,
+      onScreenText: "Inspect -> position -> capture -> narrate",
+      visual: "workflow",
+      duration: 11,
+      start: 17,
+    },
+    {
+      id: "scene-4",
+      title: "Product Evidence",
+      beat: "Ground the pitch in what the repository actually contains.",
+      narration: evidence.length
+        ? `The pitch is grounded in repository evidence: ${evidence.slice(0, 2).join(" ")}`
+        : `The pitch is grounded in the repository structure, README, app routes, and implementation details rather than a generic prompt.`,
+      onScreenText: "Grounded in repo evidence",
+      visual: "evidence",
+      duration: 11,
+      start: 28,
+    },
+    {
+      id: "scene-5",
+      title: "Real Demo Footage",
+      beat: "Explain why browser capture is a core capability.",
+      narration: `Instead of asking for a reference video, ${productName} records the product itself: first from a public demo URL, then from a temporary local runner when needed.`,
+      onScreenText: "Real browser capture",
+      visual: "product",
+      duration: 10,
+      start: 39,
+    },
+    {
+      id: "scene-6",
+      title: "Ready To Judge",
+      beat: "Close with the outcome and call to action.",
+      narration: `The result is a concise pitch video with transcript, voice, captured UI, and visible agent logs, so builders can judge the story and the system behind it.`,
+      onScreenText: "Pitch, transcript, footage, logs",
+      visual: "close",
+      duration: 9,
+      start: 49,
+    },
+  ];
+
+  return {
+    productName,
+    tagline: "A repo-to-pitch studio for agentic product demos.",
+    primaryUser: cleanString(analysis.primaryUser) || "Hackathon builders and product teams",
+    corePromise,
+    positioning,
+    strategy: cleanString(strategy.strategy) || "Use repo evidence and browser capture to turn a working product into a credible narrated pitch.",
+    score: 86,
+    cta: `Paste ${request.repoUrl.includes("github.com") ? "a GitHub repo" : "a repository URL"} and let the agents build the pitch from the real product.`,
+    insights: cleanStringArray(strategy.insightStack).length
+      ? cleanStringArray(strategy.insightStack).slice(0, 6)
+      : [
+          "The repository is the source of truth.",
+          "Capture must happen after product understanding.",
+          "A good pitch needs script, voice, evidence, and visible process.",
+        ],
+    scenes,
+    productReport: {
+      userNeed: cleanString(analysis.userNeed) || corePromise,
+      productShape: cleanString(analysis.productShape) || `${productName} is a web app that turns a repository into a narrated demo pitch.`,
+      experienceFlow: flow.length ? flow.slice(0, 6) : [
+        "Paste a repository URL.",
+        "Agents inspect product evidence.",
+        "The browser records the running demo.",
+        "The script is aligned to the capture.",
+        "The user exports the final narrated video.",
+      ],
+      coreFunctions,
+      supportingFunctions,
+      whyThisFlowWorks: "The flow matches how a strong demo is actually made: understand the product first, capture real behavior second, then script the pitch around evidence.",
+      qualityBar: [
+        "Ground claims in repository evidence.",
+        "Prefer real captured UI over invented visuals.",
+        "Keep each scene to one clear idea.",
+        "Show agent progress while long work is running.",
+        "Make transcript, voice, and export inspectable.",
+      ],
+    },
+    capturePlan: {
+      source: repo.homepage ? "public-url" : "local-runner",
+      targetUrl: repo.homepage || undefined,
+      installCommand: "auto-detect package manager and install dependencies",
+      runCommand: "auto-detect dev/start/preview script and bind to a temporary local port",
+      port: 3000,
+      steps: [
+        {
+          label: "Resolve demo target",
+          action: "Check GitHub metadata and sampled repo files for hosted demo links.",
+          expected: "Use the fastest public URL when it exists.",
+        },
+        {
+          label: "Run locally",
+          action: "Clone the repo into /tmp, install dependencies, and start the app.",
+          expected: "The app responds on a temporary localhost port.",
+        },
+        {
+          label: "Record browser",
+          action: "Open the running app with Playwright and record a short interaction.",
+          expected: "Persist screenshot and WebM footage for the pitch renderer.",
+        },
+      ],
+      message: repo.homepage
+        ? "Capture the public hosted demo first, then use the temporary local runner if the public URL fails."
+        : "Clone the repo into a temporary local runner, install dependencies, start the app, and capture browser footage.",
+    },
   };
 }
 

@@ -6,10 +6,9 @@ import { runSpeechmaticsVoiceQa } from "@/lib/speechmatics";
 import type { AgentLog, AudioResult, PitchPlan, PitchRequest, RepoContext, VoiceQaResult } from "@/lib/types";
 
 export const runtime = "nodejs";
-export const maxDuration = 180;
+export const maxDuration = 300;
 
 const DEFAULT_REPO_CONTEXT_TIMEOUT_MS = 15000;
-const DEFAULT_AGENT_RUN_TIMEOUT_MS = 90000;
 const DEFAULT_AUDIO_TIMEOUT_MS = 45000;
 
 export async function POST(request: Request) {
@@ -117,11 +116,7 @@ async function generatePitchWithBudget(
   repo: RepoContext,
 ): Promise<{ pitch: PitchPlan; agentLogs: AgentLog[]; warning?: string }> {
   try {
-    return await withTimeout(
-      generatePitchWithAgents(input, repo),
-      Number(process.env.PITCH_AGENT_TOTAL_TIMEOUT_MS || DEFAULT_AGENT_RUN_TIMEOUT_MS),
-      "Agent pipeline timed out; returned deterministic fallback.",
-    );
+    return await generatePitchWithAgents(input, repo);
   } catch (error) {
     const warning = friendlyRouteError(error, "Agent pipeline failed; returned deterministic fallback.");
     return {

@@ -5,10 +5,9 @@ import { runSpeechmaticsVoiceQa } from "@/lib/speechmatics";
 import type { AgentLog, AudioResult, PitchPlan, PitchRequest, RepoContext, VoiceQaResult } from "@/lib/types";
 
 export const runtime = "nodejs";
-export const maxDuration = 180;
+export const maxDuration = 300;
 
 const DEFAULT_REPO_CONTEXT_TIMEOUT_MS = 15000;
-const DEFAULT_AGENT_RUN_TIMEOUT_MS = 90000;
 const DEFAULT_AUDIO_TIMEOUT_MS = 45000;
 
 type PitchStreamEvent =
@@ -22,15 +21,33 @@ export async function POST(request: Request) {
 
   const stream = new ReadableStream<Uint8Array>({
     start(controller) {
+      let closed = false;
       const send = (event: PitchStreamEvent) => {
-        controller.enqueue(encoder.encode(`${JSON.stringify(event)}\n`));
+        if (closed) return;
+        try {
+          controller.enqueue(encoder.encode(`${JSON.stringify(event)}\n`));
+        } catch {
+          closed = true;
+        }
+      };
+      const close = () => {
+        if (closed) return;
+        closed = true;
+        try {
+          controller.close();
+        } catch {
+          // The browser may have navigated away after receiving the final chunk.
+        }
       };
 
       runPitchStream(request, send)
         .catch((error) => {
           send({ type: "error", message: error instanceof Error ? error.message : "Could not generate pitch video." });
         })
-        .finally(() => controller.close());
+        .finally(close);
+    },
+    cancel() {
+      // Client-side reloads or tab navigation are expected during local demos.
     },
   });
 
@@ -161,11 +178,7 @@ async function generatePitchWithBudget(
   onAgentLog: (log: AgentLog) => void,
 ): Promise<{ pitch: PitchPlan; agentLogs: AgentLog[]; warning?: string }> {
   try {
-    return await withTimeout(
-      generatePitchWithAgents(input, repo, onAgentLog),
-      Number(process.env.PITCH_AGENT_TOTAL_TIMEOUT_MS || DEFAULT_AGENT_RUN_TIMEOUT_MS),
-      "Agent pipeline timed out; returned deterministic fallback.",
-    );
+    return await generatePitchWithAgents(input, repo, onAgentLog);
   } catch (error) {
     const warning = friendlyRouteError(error, "Agent pipeline failed; returned deterministic fallback.");
     const pitch = fallbackPitchPlan(input, repo);
