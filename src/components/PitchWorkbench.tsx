@@ -785,6 +785,7 @@ async function loadCaptureMedia(capture?: DemoCaptureResult) {
         video.onerror = () => reject(new Error("Could not load capture video."));
         video.src = capture.videoUrl || "";
       });
+      await seekCaptureVideoFrame(video, 0.05);
       return video;
     } catch {
       return loadCaptureImage(capture.screenshotUrl);
@@ -792,6 +793,26 @@ async function loadCaptureMedia(capture?: DemoCaptureResult) {
   }
 
   return loadCaptureImage(capture?.screenshotUrl);
+}
+
+async function seekCaptureVideoFrame(video: HTMLVideoElement, time: number) {
+  if (!Number.isFinite(video.duration) || video.duration <= 0) return;
+  const target = Math.min(Math.max(0, time), Math.max(0, video.duration - 0.05));
+  await new Promise<void>((resolve) => {
+    const done = () => {
+      if (typeof video.requestVideoFrameCallback === "function") {
+        video.requestVideoFrameCallback(() => resolve());
+      } else {
+        requestAnimationFrame(() => resolve());
+      }
+    };
+    if (Math.abs(video.currentTime - target) < 0.03 && video.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA) {
+      done();
+      return;
+    }
+    video.addEventListener("seeked", done, { once: true });
+    video.currentTime = target;
+  });
 }
 
 async function drawExportFrames(
