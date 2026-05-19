@@ -37,7 +37,7 @@ const base64 = await page.evaluate(
       const isDemoScene = ["product", "workflow", "evidence"].includes(scene.visual);
 
       if (captureMedia && isDemoScene) {
-        drawFullscreenDemo(ctx, width, height, result, scene, time, progress, captureMedia);
+        drawFullscreenDemo(ctx, width, height, scene, captureMedia);
         return;
       }
 
@@ -76,64 +76,24 @@ const base64 = await page.evaluate(
       ctx.fillText(`${scene.title || "Scene"} · ${Math.round(time)}s`, 72, 662);
     }
 
-    function drawFullscreenDemo(ctx, width, height, result, scene, time, progress, media) {
+    function drawFullscreenDemo(ctx, width, height, scene, media) {
       drawImageCover(ctx, media, 0, 0, width, height);
 
-      const topGradient = ctx.createLinearGradient(0, 0, 0, 150);
-      topGradient.addColorStop(0, "rgba(15,23,42,0.82)");
-      topGradient.addColorStop(1, "rgba(15,23,42,0)");
-      ctx.fillStyle = topGradient;
-      ctx.fillRect(0, 0, width, 150);
-
-      const bottomGradient = ctx.createLinearGradient(0, height - 300, 0, height);
-      bottomGradient.addColorStop(0, "rgba(15,23,42,0)");
-      bottomGradient.addColorStop(0.36, "rgba(15,23,42,0.72)");
-      bottomGradient.addColorStop(1, "rgba(15,23,42,0.94)");
-      ctx.fillStyle = bottomGradient;
-      ctx.fillRect(0, height - 300, width, 300);
-
-      ctx.fillStyle = "rgba(15,23,42,0.72)";
-      roundRect(ctx, 48, 34, width - 96, 58, 10);
-      ctx.fill();
-      ctx.fillStyle = "#f8fafc";
-      ctx.font = "750 26px system-ui, -apple-system, BlinkMacSystemFont, sans-serif";
-      ctx.fillText(result.pitch.productName || "Demo", 72, 71);
-      ctx.fillStyle = "#bfdbfe";
-      ctx.font = "700 15px ui-monospace, SFMono-Regular, Menlo, monospace";
-      ctx.textAlign = "right";
-      ctx.fillText("FULLSCREEN DEMO", width - 72, 70);
-      ctx.textAlign = "left";
-
-      ctx.fillStyle = "rgba(15,23,42,0.78)";
-      roundRect(ctx, 48, height - 220, Math.min(1000, width - 96), 146, 10);
+      ctx.font = "650 20px system-ui, -apple-system, BlinkMacSystemFont, sans-serif";
+      const lines = getWrappedLines(ctx, scene.narration || "", width - 160, 2);
+      const panelHeight = lines.length > 1 ? 82 : 54;
+      const panelY = height - panelHeight - 28;
+      ctx.fillStyle = "rgba(15,23,42,0.76)";
+      roundRect(ctx, 56, panelY, width - 112, panelHeight, 8);
       ctx.fill();
       ctx.strokeStyle = "rgba(255,255,255,0.16)";
       ctx.stroke();
 
-      ctx.fillStyle = "#bfdbfe";
-      ctx.font = "700 15px ui-monospace, SFMono-Regular, Menlo, monospace";
-      ctx.fillText((scene.title || "Demo").toUpperCase(), 72, height - 184);
-      ctx.fillStyle = "#ffffff";
-      ctx.font = "850 36px system-ui, -apple-system, BlinkMacSystemFont, sans-serif";
-      wrapText(ctx, scene.onScreenText || scene.beat || "Recorded product flow", 72, height - 136, 930, 40, 2);
-
-      ctx.fillStyle = "#dbeafe";
-      ctx.font = "600 19px system-ui, -apple-system, BlinkMacSystemFont, sans-serif";
-      wrapText(ctx, scene.narration || "", 72, height - 58, width - 220, 24, 2);
-
-      ctx.fillStyle = "rgba(255,255,255,0.2)";
-      roundRect(ctx, 48, height - 18, width - 96, 6, 3);
-      ctx.fill();
-      ctx.fillStyle = "rgba(59,130,246,0.96)";
-      roundRect(ctx, 48, height - 18, (width - 96) * progress, 6, 3);
-      ctx.fill();
-
-      const total = (result.pitch.scenes || []).reduce((sum, item) => sum + Number(item.duration || 0), 0) || 1;
-      ctx.fillStyle = "#cbd5e1";
-      ctx.font = "650 14px ui-monospace, SFMono-Regular, Menlo, monospace";
-      ctx.textAlign = "right";
-      ctx.fillText(`${Math.round(Math.min(time, total))}s / ${Math.round(total)}s`, width - 48, height - 54);
-      ctx.textAlign = "left";
+      ctx.fillStyle = "#f8fafc";
+      ctx.shadowColor = "rgba(0,0,0,0.45)";
+      ctx.shadowBlur = 8;
+      lines.forEach((line, index) => ctx.fillText(line, 80, panelY + 34 + index * 27));
+      ctx.shadowBlur = 0;
     }
 
     function drawImageCover(ctx, media, x, y, w, h) {
@@ -148,21 +108,28 @@ const base64 = await page.evaluate(
     }
 
     function wrapText(ctx, text, x, y, maxWidth, lineHeight, maxLines) {
+      const output = getWrappedLines(ctx, text, maxWidth, maxLines);
+      output.forEach((line, index) => ctx.fillText(line, x, y + index * lineHeight));
+    }
+
+    function getWrappedLines(ctx, text, maxWidth, maxLines) {
       const words = String(text).split(/\s+/).filter(Boolean);
       let line = "";
       let lines = 0;
+      const output = [];
       for (const word of words) {
         const test = line ? `${line} ${word}` : word;
         if (ctx.measureText(test).width > maxWidth && line) {
-          ctx.fillText(line, x, y + lines * lineHeight);
+          output.push(line);
           line = word;
           lines += 1;
-          if (lines >= maxLines) return;
+          if (lines >= maxLines) return output;
         } else {
           line = test;
         }
       }
-      if (line && lines < maxLines) ctx.fillText(line, x, y + lines * lineHeight);
+      if (line && lines < maxLines) output.push(line);
+      return output;
     }
 
     function roundRect(ctx, x, y, w, h, radius) {

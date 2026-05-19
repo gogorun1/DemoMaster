@@ -49,7 +49,7 @@ export function drawPitchFrame(
 
   ctx.clearRect(0, 0, width, height);
   if (captureImage && isDemoScene(scene)) {
-    drawFullscreenDemo(ctx, plan, scene, sceneProgress, time, total, width, height, colors, captureImage);
+    drawFullscreenDemo(ctx, scene, width, height, captureImage);
     return;
   }
 
@@ -62,81 +62,28 @@ export function drawPitchFrame(
 
 function drawFullscreenDemo(
   ctx: CanvasRenderingContext2D,
-  plan: PitchPlan,
   scene: PitchScene,
-  progress: number,
-  time: number,
-  total: number,
   width: number,
   height: number,
-  colors: { primary: string; accent: string; secondary: string },
   captureImage: CanvasImageSource,
 ) {
   drawImageCover(ctx, captureImage, 0, 0, width, height);
 
-  const topGradient = ctx.createLinearGradient(0, 0, 0, 160);
-  topGradient.addColorStop(0, "rgba(2,6,23,0.78)");
-  topGradient.addColorStop(1, "rgba(2,6,23,0)");
-  ctx.fillStyle = topGradient;
-  ctx.fillRect(0, 0, width, 160);
-
-  const bottomGradient = ctx.createLinearGradient(0, height - 290, 0, height);
-  bottomGradient.addColorStop(0, "rgba(2,6,23,0)");
-  bottomGradient.addColorStop(0.28, "rgba(2,6,23,0.72)");
-  bottomGradient.addColorStop(1, "rgba(2,6,23,0.92)");
-  ctx.fillStyle = bottomGradient;
-  ctx.fillRect(0, height - 290, width, 290);
-
-  ctx.fillStyle = "rgba(15,23,42,0.72)";
-  roundRect(ctx, 48, 34, width - 96, 58, 8);
-  ctx.fill();
-
-  ctx.fillStyle = "#f8fafc";
-  ctx.font = "750 24px Geist, Arial, sans-serif";
-  ctx.fillText(plan.productName, 72, 70);
-
-  ctx.fillStyle = colors.accent;
-  ctx.font = "700 15px Geist Mono, monospace";
-  ctx.textAlign = "right";
-  ctx.fillText("FULLSCREEN DEMO", width - 72, 69);
-  ctx.textAlign = "left";
-
-  const panelWidth = Math.min(980, width - 96);
-  const panelX = 48;
-  const panelY = height - 214;
+  ctx.font = "650 20px Geist, Arial, sans-serif";
+  const narration = wrapText(ctx, scene.narration, width - 160, 2);
+  const panelHeight = narration.length > 1 ? 82 : 54;
+  const panelY = height - panelHeight - 28;
   ctx.fillStyle = "rgba(15,23,42,0.76)";
-  roundRect(ctx, panelX, panelY, panelWidth, 142, 8);
+  roundRect(ctx, 56, panelY, width - 112, panelHeight, 8);
   ctx.fill();
   ctx.strokeStyle = "rgba(255,255,255,0.16)";
-  ctx.lineWidth = 1;
   ctx.stroke();
 
-  ctx.fillStyle = colors.accent;
-  ctx.font = "700 15px Geist Mono, monospace";
-  ctx.fillText(scene.title.toUpperCase(), panelX + 24, panelY + 34);
-
-  ctx.fillStyle = "#ffffff";
-  ctx.font = "800 34px Geist, Arial, sans-serif";
-  const headline = wrapText(ctx, scene.onScreenText || scene.beat, panelWidth - 48, 2);
-  headline.forEach((line, index) => ctx.fillText(line, panelX + 24, panelY + 78 + index * 38));
-
-  ctx.fillStyle = "#dbe4f0";
-  ctx.font = "600 18px Geist, Arial, sans-serif";
-  const narration = wrapText(ctx, scene.narration, width - 210, 2);
-  narration.forEach((line, index) => ctx.fillText(line, 72, height - 58 + index * 24));
-
-  ctx.fillStyle = "rgba(255,255,255,0.22)";
-  roundRect(ctx, 48, height - 18, width - 96, 6, 3);
-  ctx.fill();
-  ctx.fillStyle = colors.primary;
-  roundRect(ctx, 48, height - 18, (width - 96) * progress, 6, 3);
-  ctx.fill();
-
-  ctx.fillStyle = "#cbd5e1";
-  ctx.font = "650 14px Geist Mono, monospace";
-  ctx.textAlign = "right";
-  ctx.fillText(`${Math.round(Math.min(time, total))}s / ${Math.round(total)}s`, width - 48, height - 54);
-  ctx.textAlign = "left";
+  ctx.fillStyle = "#f8fafc";
+  ctx.shadowColor = "rgba(0,0,0,0.45)";
+  ctx.shadowBlur = 8;
+  narration.forEach((line, index) => ctx.fillText(line, 80, panelY + 34 + index * 27));
+  ctx.shadowBlur = 0;
 }
 
 function drawBackground(
