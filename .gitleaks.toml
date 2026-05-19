@@ -1,0 +1,9 @@
+title = "DemoMaster gitleaks config"
+
+[extend]
+useDefault = true
+
+[allowlist]
+paths = [
+  '''package-lock\.json$''',
+]
