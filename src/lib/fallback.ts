@@ -125,6 +125,33 @@ export function fallbackPitchPlan(request: PitchRequest, repo: RepoContext): Pit
       ],
     },
     partnerStack: buildPartnerStack(Boolean(process.env.GEMINI_API_KEY)),
+    capturePlan: {
+      source: repo.homepage ? "homepage" : "vultr-runner",
+      targetUrl: repo.homepage || undefined,
+      installCommand: "auto-detect package manager and install dependencies",
+      runCommand: "auto-detect dev/start script and bind to 0.0.0.0",
+      port: 3000,
+      steps: [
+        {
+          label: "Open product",
+          action: "Load the running application in a browser viewport.",
+          expected: "The product's first useful screen is visible.",
+        },
+        {
+          label: "Show primary workflow",
+          action: "Follow the shortest path that demonstrates the core promise.",
+          expected: "The viewer sees the product doing the thing the pitch claims.",
+        },
+        {
+          label: "Capture proof",
+          action: "Record a screenshot and browser video artifact for the final pitch.",
+          expected: "The pitch can include real repo footage instead of abstract UI.",
+        },
+      ],
+      message: repo.homepage
+        ? "Use the public homepage as an immediate capture target; Vultr runner can still attempt a fresh repo run."
+        : "Provision a Vultr runner to clone, install, run, and capture the repository.",
+    },
     generatedAt: new Date().toISOString(),
   };
 }
@@ -164,6 +191,19 @@ export function fallbackAgentLogs(repo: RepoContext): AgentLog[] {
           step: "Draft storyboard",
           status: "skipped",
           message: "The fallback storyboard preserves the intended user flow without inventing unsupported product claims.",
+        },
+      ],
+    },
+    {
+      agent: "Demo Capture Agent",
+      provider: "browser",
+      entries: [
+        {
+          step: "Prepare capture plan",
+          status: "done",
+          message: repo.homepage
+            ? `Homepage capture target detected: ${repo.homepage}.`
+            : "No homepage detected; Vultr runner will attempt to run the repo from source.",
         },
       ],
     },

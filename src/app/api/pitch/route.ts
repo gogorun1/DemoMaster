@@ -1,25 +1,49 @@
 import { NextResponse } from "next/server";
+import { fallbackAgentLogs, fallbackPitchPlan } from "@/lib/fallback";
 import { generateNarrationAudio, generatePitchWithAgents } from "@/lib/gemini";
 import { loadRepoContext } from "@/lib/repo-context";
-import type { AgentLog, PitchRequest } from "@/lib/types";
+import type { AgentLog, AudioResult, PitchRequest, RepoContext } from "@/lib/types";
 
 export const runtime = "nodejs";
 export const maxDuration = 180;
+
+const DEFAULT_REPO_CONTEXT_TIMEOUT_MS = 15000;
+const DEFAULT_AGENT_RUN_TIMEOUT_MS = 90000;
+const DEFAULT_AUDIO_TIMEOUT_MS = 45000;
 
 export async function POST(request: Request) {
   try {
     const payload = (await request.json()) as Partial<PitchRequest>;
     const input = sanitizeRequest(payload);
-    const repo = await loadRepoContext(input.repoUrl);
-    const { pitch, agentLogs } = await generatePitchWithAgents(input, repo);
-    const audio = await generateNarrationAudio(pitch);
+    const repoResult = await loadRepoWithBudget(input);
+    const repo = repoResult.repo;
+    const generation = await generatePitchWithBudget(input, repo);
+    const { pitch, agentLogs } = generation;
+    const audio = await generateAudioWithBudget(pitch);
     const warnings = Array.from(new Set([
+      repoResult.warning || "",
+      generation.warning || "",
       ...repo.warnings,
       pitch.mode === "fallback" ? "Agentic generation degraded; returned the deterministic fallback pitch." : "",
       audio.status !== "ready" ? audio.message : "",
     ].filter(Boolean)));
     const fullLogs: AgentLog[] = [
       ...agentLogs,
+      ...(agentLogs.some((log) => log.agent === "Demo Capture Agent")
+        ? []
+        : [
+            {
+              agent: "Demo Capture Agent" as const,
+              provider: "browser" as const,
+              entries: [
+                {
+                  step: "Prepare Vultr runner",
+                  status: "done" as const,
+                  message: pitch.capturePlan.message,
+                },
+              ],
+            },
+          ]),
       {
         agent: "Media Renderer Agent",
         provider: "browser",
@@ -50,4 +74,79 @@ export async function POST(request: Request) {
 function sanitizeRequest(payload: Partial<PitchRequest>): PitchRequest {
   if (!payload.repoUrl?.trim()) throw new Error("A GitHub repository URL is required.");
   return { repoUrl: payload.repoUrl.trim() };
+}
+
+async function loadRepoWithBudget(input: PitchRequest): Promise<{ repo: RepoContext; warning?: string }> {
+  try {
+    const repo = await withTimeout(
+      loadRepoContext(input.repoUrl),
+      Number(process.env.REPO_CONTEXT_TIMEOUT_MS || DEFAULT_REPO_CONTEXT_TIMEOUT_MS),
+      "Repository inspection timed out; continuing with URL-only context.",
+    );
+    return { repo };
+  } catch (error) {
+    const warning = friendlyRouteError(error, "Repository inspection failed; continuing with URL-only context.");
+    return {
+      warning,
+      repo: {
+        source: "unavailable",
+        repoUrl: input.repoUrl,
+        fileTree: [],
+        files: [],
+        warnings: [warning],
+      },
+    };
+  }
+}
+
+async function generatePitchWithBudget(
+  input: PitchRequest,
+  repo: RepoContext,
+): Promise<{ pitch: Awaited<ReturnType<typeof fallbackPitchPlan>>; agentLogs: AgentLog[]; warning?: string }> {
+  try {
+    return await withTimeout(
+      generatePitchWithAgents(input, repo),
+      Number(process.env.PITCH_AGENT_TOTAL_TIMEOUT_MS || DEFAULT_AGENT_RUN_TIMEOUT_MS),
+      "Agent pipeline timed out; returned deterministic fallback.",
+    );
+  } catch (error) {
+    const warning = friendlyRouteError(error, "Agent pipeline failed; returned deterministic fallback.");
+    return {
+      warning,
+      pitch: fallbackPitchPlan(input, repo),
+      agentLogs: fallbackAgentLogs(repo),
+    };
+  }
+}
+
+async function generateAudioWithBudget(pitch: Awaited<ReturnType<typeof fallbackPitchPlan>>): Promise<AudioResult> {
+  try {
+    return await withTimeout(
+      generateNarrationAudio(pitch),
+      Number(process.env.PITCH_AUDIO_TOTAL_TIMEOUT_MS || DEFAULT_AUDIO_TIMEOUT_MS),
+      "Narration audio timed out.",
+    );
+  } catch (error) {
+    return {
+      status: "skipped",
+      provider: "gemini",
+      message: friendlyRouteError(error, "Narration audio skipped."),
+    };
+  }
+}
+
+async function withTimeout<T>(promise: Promise<T>, timeoutMs: number, message: string) {
+  let timeout: ReturnType<typeof setTimeout> | undefined;
+  const timeoutPromise = new Promise<never>((_, reject) => {
+    timeout = setTimeout(() => reject(new Error(message)), timeoutMs);
+  });
+  try {
+    return await Promise.race([promise, timeoutPromise]);
+  } finally {
+    if (timeout) clearTimeout(timeout);
+  }
+}
+
+function friendlyRouteError(error: unknown, fallback: string) {
+  return error instanceof Error && error.message ? error.message : fallback;
 }

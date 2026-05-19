@@ -4,6 +4,7 @@ import type {
   AgentLog,
   AgentLogEntry,
   AudioResult,
+  DemoCapturePlan,
   PitchPlan,
   PitchRequest,
   PitchScene,
@@ -46,6 +47,7 @@ interface PitchDraft {
   insights: string[];
   scenes: PitchScene[];
   productReport: ProductReport;
+  capturePlan: DemoCapturePlan;
 }
 
 interface QualityReview {
@@ -130,6 +132,24 @@ export async function generatePitchWithAgents(request: PitchRequest, repo: RepoC
       ],
     });
 
+    logs.push({
+      agent: "Demo Capture Agent",
+      provider: "gemini",
+      model,
+      entries: [
+        {
+          step: "Plan repo run",
+          status: "done",
+          message: draft.capturePlan?.message || "Prepared a Vultr runner plan for cloning, running, and capturing the repository.",
+        },
+        {
+          step: "Prepare Vultr provisioning",
+          status: "done",
+          message: `${draft.capturePlan?.installCommand || "auto install"} -> ${draft.capturePlan?.runCommand || "auto run"}`,
+        },
+      ],
+    });
+
     const judge = await runQualityJudge(client, model, draft, analysis, strategy).catch((error) =>
       localQualityJudge(error, model, draft),
     );
@@ -176,10 +196,10 @@ export async function generateNarrationAudio(plan: PitchPlan): Promise<AudioResu
   }
 
   try {
-    const voice = process.env.GEMINI_TTS_VOICE || "Kore";
+    const voice = process.env.GEMINI_AUDIO_VOICE || process.env.GEMINI_TTS_VOICE || "Kore";
     const response = await withTimeout(
       client.models.generateContent({
-        model: process.env.GEMINI_TTS_MODEL || "gemini-3.1-flash-tts-preview",
+        model: process.env.GEMINI_AUDIO_MODEL || process.env.GEMINI_TTS_MODEL || "gemini-3.1-flash-tts-preview",
         contents: [
           {
             parts: [
@@ -205,7 +225,7 @@ export async function generateNarrationAudio(plan: PitchPlan): Promise<AudioResu
           },
         },
       }),
-      Number(process.env.GEMINI_TTS_TIMEOUT_MS || DEFAULT_TTS_TIMEOUT_MS),
+      Number(process.env.GEMINI_AUDIO_TIMEOUT_MS || process.env.GEMINI_TTS_TIMEOUT_MS || DEFAULT_TTS_TIMEOUT_MS),
       "Gemini narration timed out.",
     );
 
@@ -310,9 +330,12 @@ async function runCreativeDirector(
         "Include a presenter-style scene that can look like a person speaking to camera.",
         "Keep total duration between 45 and 70 seconds.",
         "Also produce a product/UX report explaining why this product and flow make sense.",
+        "Also produce a demo capture plan for running the input repository on Vultr and recording real browser footage.",
+        "If the repository has a homepage, use it as a fallback capture target, but still describe the Vultr run path.",
       ],
     )}\n\nAnalysis:\n${JSON.stringify(analysis, null, 2)}\n\nStrategy:\n${JSON.stringify(strategy, null, 2)}`,
     pitchDraftSchema,
+    Number(process.env.GEMINI_CREATIVE_TIMEOUT_MS || 45000),
   );
 }
 
@@ -471,24 +494,21 @@ async function generateJson<T>(
   model: string,
   prompt: string,
   schema: Record<string, unknown>,
+  timeoutMs = Number(process.env.GEMINI_AGENT_TIMEOUT_MS || DEFAULT_AGENT_TIMEOUT_MS),
 ): Promise<T> {
   try {
     const response = await withTimeout(
       client.models.generateContent({
         model,
-        contents: prompt,
+        contents: `${prompt}\n\nReturn strict JSON only. Do not wrap it in Markdown.`,
         config: {
           temperature: 0.35,
           maxOutputTokens: 8192,
-          responseFormat: {
-            text: {
-              mimeType: "application/json",
-              schema,
-            },
-          },
+          responseMimeType: "application/json",
+          responseSchema: schema,
         } as unknown as Record<string, unknown>,
       }),
-      Number(process.env.GEMINI_AGENT_TIMEOUT_MS || DEFAULT_AGENT_TIMEOUT_MS),
+      timeoutMs,
       `Gemini agent call timed out on ${model}.`,
     );
     return parseJson(response.text ?? "{}") as T;
@@ -502,10 +522,9 @@ async function generateJson<T>(
           temperature: 0.35,
           maxOutputTokens: 8192,
           responseMimeType: "application/json",
-          responseSchema: schema,
         } as unknown as Record<string, unknown>,
       }),
-      Number(process.env.GEMINI_AGENT_TIMEOUT_MS || DEFAULT_AGENT_TIMEOUT_MS),
+      timeoutMs,
       `Gemini agent call timed out on ${model}.`,
     );
     return parseJson(response.text ?? "{}") as T;
@@ -575,6 +594,7 @@ function normalizePitchPlan(
   const productReport = normalizeReport(draft.productReport, fallback.productReport);
   productReport.qualityBar = [...new Set([...productReport.qualityBar, ...review.fixes])].slice(0, 8);
   const draftName = cleanString(draft.productName);
+  const capturePlan = normalizeCapturePlan(draft.capturePlan, fallback.capturePlan, repo);
 
   return {
     mode: "agentic",
@@ -596,7 +616,37 @@ function normalizePitchPlan(
     narration: scenes.map((scene) => scene.narration).join(" "),
     productReport,
     partnerStack: buildPartnerStack(true),
+    capturePlan,
     generatedAt: new Date().toISOString(),
+  };
+}
+
+function normalizeCapturePlan(
+  plan: DemoCapturePlan | undefined,
+  fallback: DemoCapturePlan,
+  repo: RepoContext,
+): DemoCapturePlan {
+  const steps = Array.isArray(plan?.steps) && plan.steps.length
+    ? plan.steps
+        .map((step) => ({
+          label: cleanString(step.label),
+          action: cleanString(step.action),
+          expected: cleanString(step.expected),
+        }))
+        .filter((step) => step.label && step.action && step.expected)
+        .slice(0, 5)
+    : fallback.steps;
+
+  return {
+    source: plan?.source === "homepage" && (plan.targetUrl || repo.homepage) ? "homepage" : "vultr-runner",
+    targetUrl: cleanString(plan?.targetUrl) || repo.homepage || fallback.targetUrl,
+    installCommand: cleanString(plan?.installCommand) || fallback.installCommand,
+    runCommand: cleanString(plan?.runCommand) || fallback.runCommand,
+    port: clamp(Number(plan?.port) || fallback.port || 3000, 1024, 65535),
+    steps,
+    message:
+      cleanString(plan?.message) ||
+      "Vultr runner will clone the repo, install dependencies, start the app, and capture real browser footage.",
   };
 }
 
@@ -754,6 +804,16 @@ const functionSchema = {
   required: ["name", "why"],
 };
 
+const captureStepSchema = {
+  type: "object",
+  properties: {
+    label: { type: "string" },
+    action: { type: "string" },
+    expected: { type: "string" },
+  },
+  required: ["label", "action", "expected"],
+};
+
 const pitchStrategySchema = {
   type: "object",
   properties: {
@@ -828,6 +888,19 @@ const pitchDraftSchema = {
         "qualityBar",
       ],
     },
+    capturePlan: {
+      type: "object",
+      properties: {
+        source: { type: "string", enum: ["homepage", "vultr-runner"] },
+        targetUrl: { type: "string" },
+        installCommand: { type: "string" },
+        runCommand: { type: "string" },
+        port: { type: "integer", minimum: 1024, maximum: 65535 },
+        steps: { type: "array", items: captureStepSchema, minItems: 3, maxItems: 5 },
+        message: { type: "string" },
+      },
+      required: ["source", "installCommand", "runCommand", "port", "steps", "message"],
+    },
   },
   required: [
     "productName",
@@ -841,6 +914,7 @@ const pitchDraftSchema = {
     "insights",
     "scenes",
     "productReport",
+    "capturePlan",
   ],
 };
 

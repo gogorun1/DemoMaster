@@ -45,6 +45,34 @@ export interface PartnerCapability {
   detail: string;
 }
 
+export interface DemoCaptureStep {
+  label: string;
+  action: string;
+  expected: string;
+}
+
+export interface DemoCapturePlan {
+  source: "homepage" | "vultr-runner";
+  targetUrl?: string;
+  installCommand: string;
+  runCommand: string;
+  port: number;
+  steps: DemoCaptureStep[];
+  message: string;
+}
+
+export interface DemoCaptureResult {
+  status: "ready" | "running" | "skipped" | "error" | "destroyed";
+  provider: "vultr";
+  instanceId?: string;
+  targetUrl?: string;
+  statusUrl?: string;
+  screenshotUrl?: string;
+  videoUrl?: string;
+  message: string;
+  logs: AgentLogEntry[];
+}
+
 export interface AgentLogEntry {
   step: string;
   status: "pending" | "running" | "done" | "skipped" | "error";
@@ -56,6 +84,7 @@ export type AgentName =
   | "Pitch Strategy Agent"
   | "Creative Director Agent"
   | "Quality Judge Agent"
+  | "Demo Capture Agent"
   | "Media Renderer Agent";
 
 export interface AgentLog {
@@ -91,6 +120,7 @@ export interface PitchPlan {
   narration: string;
   productReport: ProductReport;
   partnerStack: PartnerCapability[];
+  capturePlan: DemoCapturePlan;
   generatedAt: string;
 }
 
@@ -107,6 +137,7 @@ export interface PitchResponse {
   repo: RepoContext;
   pitch: PitchPlan;
   audio: AudioResult;
+  capture?: DemoCaptureResult;
   warnings: string[];
   agentLogs: AgentLog[];
 }

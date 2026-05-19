@@ -81,22 +81,28 @@ export async function loadRepoContext(repoUrl: string): Promise<RepoContext> {
       .map((item) => item.path)
       .sort((a, b) => a.localeCompare(b));
 
-    const selected = selectFiles(tree.tree);
-    const files: RepoFileSummary[] = [];
-    let totalChars = 0;
-
-    for (const file of selected) {
-      if (totalChars >= MAX_TOTAL_CHARS) break;
-      const raw = `https://raw.githubusercontent.com/${parsed.owner}/${parsed.repo}/${branch}/${file.path}`;
-      try {
+    const fileResults = await Promise.allSettled(
+      selectFiles(tree.tree).map(async (file) => {
+        const raw = `https://raw.githubusercontent.com/${parsed.owner}/${parsed.repo}/${branch}/${file.path}`;
         const content = await fetchText(raw, headers);
         const truncated = content.length > MAX_FILE_CHARS;
-        const clipped = truncated ? `${content.slice(0, MAX_FILE_CHARS)}\n\n[truncated]` : content;
-        totalChars += clipped.length;
-        files.push({ path: file.path, content: clipped });
-      } catch {
-        warnings.push(`Could not read ${file.path}.`);
+        return {
+          path: file.path,
+          content: truncated ? `${content.slice(0, MAX_FILE_CHARS)}\n\n[truncated]` : content,
+        };
+      }),
+    );
+
+    const files: RepoFileSummary[] = [];
+    let totalChars = 0;
+    for (const result of fileResults) {
+      if (result.status === "rejected") {
+        warnings.push("Could not read one sampled file.");
+        continue;
       }
+      if (totalChars >= MAX_TOTAL_CHARS) break;
+      totalChars += result.value.content.length;
+      files.push(result.value);
     }
 
     return {

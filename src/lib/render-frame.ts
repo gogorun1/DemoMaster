@@ -20,7 +20,12 @@ export function getSceneAtTime(plan: PitchPlan, time: number) {
   );
 }
 
-export function drawPitchFrame(ctx: CanvasRenderingContext2D, plan: PitchPlan, time: number) {
+export function drawPitchFrame(
+  ctx: CanvasRenderingContext2D,
+  plan: PitchPlan,
+  time: number,
+  captureImage?: CanvasImageSource,
+) {
   const { width, height } = ctx.canvas;
   const scene = getSceneAtTime(plan, time);
   const total = getTotalDuration(plan);
@@ -30,7 +35,7 @@ export function drawPitchFrame(ctx: CanvasRenderingContext2D, plan: PitchPlan, t
   ctx.clearRect(0, 0, width, height);
   drawBackground(ctx, width, height, colors);
   drawHeader(ctx, plan, time, total, width);
-  drawVisual(ctx, scene, sceneProgress, width, height, colors);
+  drawVisual(ctx, scene, sceneProgress, width, height, colors, captureImage);
   drawCopy(ctx, plan, scene, sceneProgress, width, height, colors);
   drawTimeline(ctx, plan, time, width, height);
 }
@@ -96,6 +101,7 @@ function drawVisual(
   width: number,
   height: number,
   colors: { primary: string; accent: string; secondary: string },
+  captureImage?: CanvasImageSource,
 ) {
   const left = 68;
   const top = 136;
@@ -109,12 +115,44 @@ function drawVisual(
   ctx.fill();
   ctx.stroke();
 
+  if (captureImage && ["product", "workflow", "evidence"].includes(scene.visual)) {
+    drawCapturedProduct(ctx, left, top, boxWidth, boxHeight, colors, captureImage);
+    return;
+  }
+
   if (scene.visual === "presenter") drawTalkingHead(ctx, left, top, boxWidth, boxHeight, colors, progress);
   if (scene.visual === "problem") drawProblem(ctx, left, top, boxWidth, boxHeight, colors, progress);
   if (scene.visual === "product") drawSolution(ctx, left, top, boxWidth, boxHeight, colors, progress);
   if (scene.visual === "workflow") drawWorkflow(ctx, left, top, boxWidth, boxHeight, colors, progress);
   if (scene.visual === "evidence") drawProof(ctx, left, top, boxWidth, boxHeight, colors, progress);
   if (scene.visual === "close") drawCta(ctx, left, top, boxWidth, boxHeight, colors, progress);
+}
+
+function drawCapturedProduct(
+  ctx: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  width: number,
+  height: number,
+  colors: { primary: string; accent: string },
+  captureImage: CanvasImageSource,
+) {
+  ctx.fillStyle = "#ffffff";
+  roundRect(ctx, x + 30, y + 44, width - 60, height - 88, 8);
+  ctx.fill();
+
+  drawImageCover(ctx, captureImage, x + 38, y + 72, width - 76, height - 136);
+
+  ctx.fillStyle = "rgba(17,19,23,0.82)";
+  roundRect(ctx, x + 54, y + height - 116, width - 108, 46, 8);
+  ctx.fill();
+  ctx.fillStyle = colors.accent;
+  ctx.font = "700 18px Geist, Arial, sans-serif";
+  fitText(ctx, "Captured from the running repo", x + 74, y + height - 87, width - 150);
+  ctx.strokeStyle = colors.primary;
+  ctx.lineWidth = 4;
+  roundRect(ctx, x + 38, y + 72, width - 76, height - 136, 8);
+  ctx.stroke();
 }
 
 function drawProblem(
@@ -422,6 +460,29 @@ function roundRect(ctx: CanvasRenderingContext2D, x: number, y: number, width: n
   ctx.arcTo(x, y + height, x, y, r);
   ctx.arcTo(x, y, x + width, y, r);
   ctx.closePath();
+}
+
+function drawImageCover(
+  ctx: CanvasRenderingContext2D,
+  image: CanvasImageSource,
+  x: number,
+  y: number,
+  width: number,
+  height: number,
+) {
+  const sourceWidth = Number("naturalWidth" in image ? image.naturalWidth : "videoWidth" in image ? image.videoWidth : width) || width;
+  const sourceHeight = Number("naturalHeight" in image ? image.naturalHeight : "videoHeight" in image ? image.videoHeight : height) || height;
+  const scale = Math.max(width / sourceWidth, height / sourceHeight);
+  const sw = width / scale;
+  const sh = height / scale;
+  const sx = (sourceWidth - sw) / 2;
+  const sy = (sourceHeight - sh) / 2;
+
+  ctx.save();
+  roundRect(ctx, x, y, width, height, 8);
+  ctx.clip();
+  ctx.drawImage(image, sx, sy, sw, sh, x, y, width, height);
+  ctx.restore();
 }
 
 function wrapText(ctx: CanvasRenderingContext2D, text: string, maxWidth: number, maxLines: number) {
