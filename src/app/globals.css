@@ -200,6 +200,10 @@ a {
   box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.12);
 }
 
+.compact-field {
+  gap: 6px;
+}
+
 .button-row {
   display: flex;
   align-items: center;
@@ -584,6 +588,48 @@ a {
   padding: 10px;
 }
 
+.manual-runner {
+  display: grid;
+  gap: 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #f8fafc;
+  padding: 12px;
+}
+
+.manual-runner-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.manual-runner-head strong {
+  display: block;
+  color: var(--ink);
+  font-size: 13px;
+}
+
+.manual-script {
+  width: 100%;
+  min-height: 170px;
+  resize: vertical;
+  border: 1px solid var(--line-strong);
+  border-radius: 7px;
+  background: #ffffff;
+  color: var(--ink);
+  padding: 10px 12px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+  font-size: 12px;
+  line-height: 1.45;
+  outline: none;
+}
+
+.manual-script:focus {
+  border-color: var(--blue);
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.12);
+}
+
 .capture-preview {
   display: grid;
   gap: 10px;
@@ -708,6 +754,7 @@ a {
   .topbar,
   .stage-controls,
   .button-row,
+  .manual-runner-head,
   .stage-meta {
     align-items: stretch;
     grid-template-columns: 1fr;

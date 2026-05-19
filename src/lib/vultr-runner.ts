@@ -40,8 +40,7 @@ export async function startVultrRunner(repoUrl: string, capturePlan: DemoCapture
   const osId = Number(process.env.VULTR_OS_ID || 1743);
   const label = `demomaster-${parsed.owner}-${parsed.repo}`.toLowerCase().replace(/[^a-z0-9-]/g, "-").slice(0, 63);
 
-  const cloneUrl = `https://github.com/${parsed.owner}/${parsed.repo}.git`;
-  const userData = Buffer.from(buildCloudInit(cloneUrl, capturePlan, parsed.branch), "utf8").toString("base64");
+  const userData = Buffer.from(buildManualCloudInit(repoUrl, capturePlan), "utf8").toString("base64");
   const payload = await vultrFetch<{ instance: VultrInstance }>(apiKey, "/instances", {
     method: "POST",
     body: JSON.stringify({
@@ -61,6 +60,73 @@ export async function startVultrRunner(repoUrl: string, capturePlan: DemoCapture
     status: "running",
     message: "Vultr instance created. Cloud-init is cloning, installing, running, and capturing the repository.",
   });
+
+  return {
+    capture,
+    agentLog: {
+      agent: "Demo Capture Agent",
+      provider: "browser",
+      entries: capture.logs,
+    },
+  };
+}
+
+export function prepareManualVultrRunner(repoUrl: string, capturePlan: DemoCapturePlan): {
+  cloudInit: string;
+  statusUrl: string;
+  agentLog: AgentLog;
+} {
+  const cloudInit = buildManualCloudInit(repoUrl, capturePlan);
+  return {
+    cloudInit,
+    statusUrl: "http://<VULTR_PUBLIC_IP>:8090/status.json",
+    agentLog: {
+      agent: "Demo Capture Agent",
+      provider: "browser",
+      entries: [
+        {
+          step: "Prepare manual Vultr runner",
+          status: "done",
+          message: "Generated cloud-init for a manually-created Vultr Compute instance.",
+        },
+      ],
+    },
+  };
+}
+
+export async function attachManualVultrRunner(statusUrl: string): Promise<{
+  capture: DemoCaptureResult;
+  agentLog: AgentLog;
+}> {
+  const parsed = parsePublicStatusUrl(statusUrl);
+  if (!parsed) return skipped("Enter a public Vultr runner status URL like http://203.0.113.10:8090/status.json.");
+
+  const runnerStatus = await fetchRunnerStatusUrl(parsed.toString());
+  if (!runnerStatus) return skipped("Could not read the manual Vultr runner status URL yet.");
+
+  const baseUrl = new URL(".", parsed).toString();
+  const status = runnerStatus.status === "ready" ? "ready" : runnerStatus.status === "error" ? "error" : "running";
+  const capture: DemoCaptureResult = {
+    status,
+    provider: "vultr",
+    targetUrl: runnerStatus.appUrl,
+    statusUrl: parsed.toString(),
+    screenshotUrl: status === "ready" ? new URL(runnerStatus.screenshot || "capture.png", baseUrl).toString() : undefined,
+    videoUrl: status === "ready" ? new URL(runnerStatus.video || "capture.webm", baseUrl).toString() : undefined,
+    message: runnerStatus.message || "Read manual Vultr runner status.",
+    logs: [
+      {
+        step: "Attach manual Vultr runner",
+        status: "done",
+        message: parsed.toString(),
+      },
+      {
+        step: "Read runner status",
+        status: status === "ready" ? "done" : status === "error" ? "error" : "running",
+        message: runnerStatus.message || "Runner is still preparing capture artifacts.",
+      },
+    ],
+  };
 
   return {
     capture,
@@ -220,10 +286,14 @@ async function vultrFetch<T = unknown>(
 }
 
 async function fetchRunnerStatus(ip: string): Promise<RunnerStatus | undefined> {
+  return fetchRunnerStatusUrl(`http://${ip}:${STATUS_PORT}/status.json`);
+}
+
+async function fetchRunnerStatusUrl(url: string): Promise<RunnerStatus | undefined> {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 3500);
   try {
-    const response = await fetch(`http://${ip}:${STATUS_PORT}/status.json`, {
+    const response = await fetch(url, {
       cache: "no-store",
       signal: controller.signal,
     });
@@ -240,6 +310,13 @@ function normalizeRunnerStatus(status: RunnerStatus["status"], instance: VultrIn
   if (status === "ready" || status === "error") return status;
   if (instance.status === "active" || instance.power_status === "running") return "running";
   return "running";
+}
+
+function buildManualCloudInit(repoUrl: string, plan: DemoCapturePlan) {
+  const parsed = parseGitHubUrl(repoUrl);
+  if (!parsed) throw new Error("Manual Vultr runner currently accepts GitHub repository URLs only.");
+  const cloneUrl = `https://github.com/${parsed.owner}/${parsed.repo}.git`;
+  return buildCloudInit(cloneUrl, plan, parsed.branch);
 }
 
 function buildCloudInit(repoUrl: string, plan: DemoCapturePlan, branch?: string) {
@@ -367,13 +444,17 @@ write_files:
       const publicDir = root + "/public";
       const port = fs.readFileSync(root + "/app-port", "utf8").trim() || "${port}";
       const ip = (await import("node:os")).networkInterfaces();
+      const publicIp = await fetch("https://api.ipify.org", { signal: AbortSignal.timeout(3000) })
+        .then((response) => response.ok ? response.text() : "")
+        .catch(() => "");
       const target = "http://127.0.0.1:" + port;
       const homepage = fs.readFileSync(root + "/homepage-url", "utf8").trim();
       const status = (state, message, url = target) => {
+        const address = publicIp || Object.values(ip).flat().find((item) => item?.family === "IPv4" && !item.internal)?.address || "127.0.0.1";
         fs.writeFileSync(publicDir + "/status.json", JSON.stringify({
           status: state,
           message,
-          appUrl: url.replace("127.0.0.1", Object.values(ip).flat().find((item) => item?.family === "IPv4" && !item.internal)?.address || "127.0.0.1"),
+          appUrl: url.replace("127.0.0.1", address),
           screenshot: "capture.png",
           video: "capture.webm",
           updatedAt: new Date().toISOString(),
@@ -417,4 +498,25 @@ runcmd:
 
 function shellQuote(value: string) {
   return `'${value.replace(/'/g, "'\\''")}'`;
+}
+
+function parsePublicStatusUrl(input: string) {
+  try {
+    const url = new URL(input.trim());
+    if (!["http:", "https:"].includes(url.protocol)) return null;
+    if (!url.pathname.endsWith("/status.json")) return null;
+    if (isPrivateHost(url.hostname)) return null;
+    return url;
+  } catch {
+    return null;
+  }
+}
+
+function isPrivateHost(hostname: string) {
+  const host = hostname.toLowerCase();
+  if (host === "localhost" || host.endsWith(".local")) return true;
+  if (/^127\./.test(host) || /^10\./.test(host) || /^169\.254\./.test(host)) return true;
+  if (/^192\.168\./.test(host)) return true;
+  const match = host.match(/^172\.(\d{1,2})\./);
+  return Boolean(match && Number(match[1]) >= 16 && Number(match[1]) <= 31);
 }

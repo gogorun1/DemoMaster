@@ -7,7 +7,7 @@ The app is intentionally repo-only:
 1. Paste a GitHub repository URL.
 2. Gemini agents inspect the repo, define the product flow, write the pitch, and judge the quality.
 3. Gemini generates narration audio.
-4. A Demo Capture Agent can provision a Vultr VM, run the repo, and capture real browser footage.
+4. A Demo Capture Agent can provision or attach a Vultr VM, run the repo, and capture real browser footage.
 5. The browser renders a playable 16:9 pitch video that can be exported as WebM.
 
 No reference-video input or external video-database workflow is used.
@@ -17,7 +17,7 @@ No reference-video input or external video-database workflow is used.
 - Google Gemini: primary reasoning, strategy, storyboard, quality judge, and narration audio.
 - Featherless: optional second-opinion critic through an OpenAI-compatible API.
 - Speechmatics: optional future extension for voice-first briefs; not required for repo-only input.
-- Vultr: VM runner for cloning the repository, launching it, and capturing real demo footage.
+- Vultr: VM runner for cloning the repository, launching it, and capturing real demo footage through API or manual Console flow.
 
 ## Getting Started
 
@@ -68,7 +68,8 @@ The app includes a Vultr-backed Demo Capture Agent:
 
 - Gemini creates a capture plan from the repo.
 - The user explicitly clicks `Start Vultr runner`.
-- The server calls the Vultr API to create a VM with cloud-init user data.
+- If Vultr API access is available, the server calls the Vultr API to create a VM with cloud-init user data.
+- If `Enable API` is blocked on the hackathon account, click `Prepare` under Manual Vultr runner, paste the generated cloud-init into a regular Vultr Compute instance in the Console, then attach `http://<VULTR_PUBLIC_IP>:8090/status.json`.
 - The VM clones the repo, detects the package manager, installs dependencies, starts the app, installs Playwright, and writes `capture.png`, `capture.webm`, and `status.json`.
 - The web UI polls runner status and uses the captured screenshot in the video renderer.
 
