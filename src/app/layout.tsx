@@ -14,7 +14,7 @@ const geistMono = Geist_Mono({
 
 export const metadata: Metadata = {
   title: "DemoMaster",
-  description: "Generate narrated product pitch videos from demo repositories.",
+  description: "Generate AI Agent Olympics-style narrated pitch videos from demo repositories.",
 };
 
 export default function RootLayout({

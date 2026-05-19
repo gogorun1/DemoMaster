@@ -1,12 +1,12 @@
 import type { PitchPlan, PitchScene, VisualMode } from "@/lib/types";
 
 const palette: Record<VisualMode, { primary: string; secondary: string; accent: string }> = {
-  talkingHead: { primary: "#83d17d", secondary: "#132017", accent: "#d7f5d3" },
-  problem: { primary: "#ed8796", secondary: "#2a171b", accent: "#f4b8c2" },
-  solution: { primary: "#83d17d", secondary: "#152317", accent: "#d7f5d3" },
-  workflow: { primary: "#7ed6bf", secondary: "#142320", accent: "#c9f4e9" },
-  proof: { primary: "#f2c36b", secondary: "#271f10", accent: "#f7ddb0" },
-  cta: { primary: "#a8c7fa", secondary: "#151d2b", accent: "#d7e4ff" },
+  presenter: { primary: "#2563eb", secondary: "#101827", accent: "#dbeafe" },
+  problem: { primary: "#dc2626", secondary: "#241313", accent: "#fecaca" },
+  product: { primary: "#059669", secondary: "#0d1c17", accent: "#d1fae5" },
+  workflow: { primary: "#7c3aed", secondary: "#181126", accent: "#ede9fe" },
+  evidence: { primary: "#d97706", secondary: "#21180d", accent: "#fed7aa" },
+  close: { primary: "#0f766e", secondary: "#0c1d1b", accent: "#ccfbf1" },
 };
 
 export function getTotalDuration(plan: PitchPlan) {
@@ -109,12 +109,12 @@ function drawVisual(
   ctx.fill();
   ctx.stroke();
 
-  if (scene.visual === "talkingHead") drawTalkingHead(ctx, left, top, boxWidth, boxHeight, colors, progress);
+  if (scene.visual === "presenter") drawTalkingHead(ctx, left, top, boxWidth, boxHeight, colors, progress);
   if (scene.visual === "problem") drawProblem(ctx, left, top, boxWidth, boxHeight, colors, progress);
-  if (scene.visual === "solution") drawSolution(ctx, left, top, boxWidth, boxHeight, colors, progress);
+  if (scene.visual === "product") drawSolution(ctx, left, top, boxWidth, boxHeight, colors, progress);
   if (scene.visual === "workflow") drawWorkflow(ctx, left, top, boxWidth, boxHeight, colors, progress);
-  if (scene.visual === "proof") drawProof(ctx, left, top, boxWidth, boxHeight, colors, progress);
-  if (scene.visual === "cta") drawCta(ctx, left, top, boxWidth, boxHeight, colors, progress);
+  if (scene.visual === "evidence") drawProof(ctx, left, top, boxWidth, boxHeight, colors, progress);
+  if (scene.visual === "close") drawCta(ctx, left, top, boxWidth, boxHeight, colors, progress);
 }
 
 function drawProblem(
@@ -332,7 +332,7 @@ function drawCopy(
 
   ctx.fillStyle = "#aab3a8";
   ctx.font = "600 15px Geist Mono, monospace";
-  ctx.fillText(plan.audience, x, height - 28);
+  ctx.fillText(plan.primaryUser, x, height - 28);
 }
 
 function drawTimeline(ctx: CanvasRenderingContext2D, plan: PitchPlan, time: number, width: number, height: number) {

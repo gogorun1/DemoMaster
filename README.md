@@ -1,13 +1,22 @@
 # DemoMaster
 
-DemoMaster turns a demo repository into a narrated product pitch video plan and browser-rendered video export.
+DemoMaster turns one GitHub repository into a narrated product pitch video for the AI Agent Olympics / Milan AI Week demo format.
 
-It combines:
+The app is intentionally repo-only:
 
-- Gemini structured output for repo understanding, positioning, scriptwriting, and pitch strategy.
-- Immediate browser preview narration for local playback and WebM export.
-- VideoDB generated media jobs for supporting pitch video clips, voice narration, background music, and final timeline stream compilation from the repo-derived story.
-- A browser canvas renderer that previews and exports a narrated WebM pitch video.
+1. Paste a GitHub repository URL.
+2. Gemini agents inspect the repo, define the product flow, write the pitch, and judge the quality.
+3. Gemini TTS generates narration.
+4. The browser renders a playable 16:9 pitch video that can be exported as WebM.
+
+No reference-video input or external video-database workflow is used.
+
+## Partner Stack
+
+- Google Gemini: primary reasoning, strategy, storyboard, quality judge, and TTS narration.
+- Featherless: optional second-opinion critic through an OpenAI-compatible API.
+- Speechmatics: optional future extension for voice-first briefs; not required for repo-only input.
+- Vultr: deployment target for the hackathon demo.
 
 ## Getting Started
 
@@ -25,19 +34,28 @@ Set these in `.env.local`:
 
 ```bash
 GEMINI_API_KEY=...
-VIDEODB_API_KEY=...
+GEMINI_REASONING_MODEL=gemini-3.1-pro-preview
+GEMINI_TTS_MODEL=gemini-3.1-flash-tts-preview
+GEMINI_TTS_VOICE=Kore
 GITHUB_TOKEN=...
 ```
 
-`GITHUB_TOKEN` is optional for public repositories, but helps avoid rate limits. If Gemini keys are absent, DemoMaster returns a deterministic fallback plan so the UI remains usable. If VideoDB keys are absent, it still builds and exports the pitch video, but skips generated media jobs.
+Optional partner extensions:
 
-## Flow
+```bash
+FEATHERLESS_API_KEY=...
+FEATHERLESS_MODEL=Qwen/Qwen3-235B-A22B-Instruct-2507
+SPEECHMATICS_API_KEY=...
+VULTR_API_KEY=...
+```
 
-1. Paste a GitHub repository URL.
-2. Generate a pitch package.
-3. Review the transcript, scene plan, and VideoDB-generated media jobs.
-4. Preview the timeline, play the browser narration, export a WebM, or finalize the VideoDB stream when generated assets are ready.
+`GITHUB_TOKEN` is optional for public repositories, but helps avoid rate limits and is required for private repos. If `GEMINI_API_KEY` is absent, the app returns a deterministic fallback so the UI stays usable.
 
-## Notes
+## Scripts
 
-The app is designed as a hackathon-quality MVP. For production, add persisted jobs, upload handling, authenticated private repo access, durable media storage, and background rendering.
+```bash
+npm run dev
+npm run lint
+npm run typecheck
+npm run build
+```

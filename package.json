@@ -15,8 +15,7 @@
     "lucide-react": "latest",
     "next": "latest",
     "react": "latest",
-    "react-dom": "latest",
-    "videodb": "latest"
+    "react-dom": "latest"
   },
   "devDependencies": {
     "@types/node": "latest",
