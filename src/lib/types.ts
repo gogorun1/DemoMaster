@@ -68,6 +68,7 @@ export interface DemoCaptureResult {
   targetUrl?: string;
   screenshotUrl?: string;
   videoUrl?: string;
+  interactionSummary?: string[];
   message: string;
   logs: AgentLogEntry[];
 }

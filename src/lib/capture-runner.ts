@@ -34,7 +34,7 @@ export async function runBrowserCapture(repoUrl: string, plan: DemoCapturePlan):
       status: "done",
       message: `Trying ${publicCandidates[0]} before local install.`,
     });
-    const publicAttempt = await capturePublicUrl(publicCandidates[0]);
+    const publicAttempt = await capturePublicUrl(publicCandidates[0], repoUrl);
     entries.push(...publicAttempt.entries);
     if (publicAttempt.capture?.status === "ready") {
       return result(publicAttempt.capture, entries);
@@ -74,9 +74,9 @@ function result(capture: DemoCaptureResult, entries: AgentLog["entries"]) {
   };
 }
 
-async function capturePublicUrl(url: string): Promise<CaptureAttempt> {
+async function capturePublicUrl(url: string, repoUrl: string): Promise<CaptureAttempt> {
   try {
-    const capture = await captureUrl(url, "public-url", "Captured the public demo URL with Playwright.");
+    const capture = await captureUrl(url, "public-url", "Captured the public demo URL with Playwright.", repoUrl);
     return {
       capture,
       entries: [
@@ -154,7 +154,7 @@ async function captureLocalRepo(repoUrl: string, plan: DemoCapturePlan, previous
       message: `${runLabel(manager, script)} responded on ${targetUrl}.`,
     });
 
-    const capture = await captureUrl(targetUrl, "local-runner", "Captured the repository running in a local temporary runner, then stopped and removed the runner.");
+    const capture = await captureUrl(targetUrl, "local-runner", "Captured the repository running in a local temporary runner, then stopped and removed the runner.", repoUrl);
     return {
       capture,
       entries: [
@@ -186,7 +186,7 @@ async function captureLocalRepo(repoUrl: string, plan: DemoCapturePlan, previous
   }
 }
 
-async function captureUrl(url: string, provider: CaptureProvider, message: string): Promise<DemoCaptureResult> {
+async function captureUrl(url: string, provider: CaptureProvider, message: string, repoUrl: string): Promise<DemoCaptureResult> {
   const { chromium } = await import("playwright");
   const runId = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
   const dir = path.join(CAPTURE_ROOT, runId);
@@ -201,16 +201,15 @@ async function captureUrl(url: string, provider: CaptureProvider, message: strin
   const page = await context.newPage();
   let videoPath = "";
   let video: ReturnType<typeof page.video> | null = null;
+  let interactionSummary: string[] = [];
 
   try {
     await withTimeout(page.goto(url, { waitUntil: "domcontentloaded", timeout: 30000 }), PUBLIC_CAPTURE_TIMEOUT_MS, "Page did not load in time.");
     video = page.video();
     await page.waitForTimeout(1800);
+    interactionSummary = await performDemoInteractionFlow(page, repoUrl);
     await page.screenshot({ path: path.join(dir, "capture.png"), fullPage: false });
-    await page.mouse.move(240, 260);
-    await page.waitForTimeout(700);
-    await page.mouse.wheel(0, 500).catch(() => undefined);
-    await page.waitForTimeout(1400);
+    await page.waitForTimeout(900);
   } finally {
     await page.close().catch(() => undefined);
     await context.close().catch(() => undefined);
@@ -219,7 +218,7 @@ async function captureUrl(url: string, provider: CaptureProvider, message: strin
   }
 
   if (videoPath) await copyFile(videoPath, path.join(dir, "capture.webm")).catch(() => undefined);
-  await writeFile(path.join(dir, "meta.json"), JSON.stringify({ url, provider, capturedAt: new Date().toISOString() }, null, 2));
+  await writeFile(path.join(dir, "meta.json"), JSON.stringify({ url, provider, capturedAt: new Date().toISOString(), interactionSummary }, null, 2));
 
   return {
     status: "ready",
@@ -228,9 +227,190 @@ async function captureUrl(url: string, provider: CaptureProvider, message: strin
     targetUrl: url,
     screenshotUrl: `/api/captures/${runId}/capture.png`,
     videoUrl: existsSync(path.join(dir, "capture.webm")) ? `/api/captures/${runId}/capture.webm` : undefined,
+    interactionSummary,
     message,
     logs: [],
   };
+}
+
+async function performDemoInteractionFlow(page: import("playwright").Page, repoUrl: string) {
+  const summary = ["Opened the live product page in a browser."];
+  await page.mouse.move(170, 120);
+  await page.waitForTimeout(450);
+
+  const input = await findRepoLikeInput(page);
+  if (input) {
+    await input.click({ timeout: 2500 }).catch(() => undefined);
+    summary.push("Focused the main repository or URL input field.");
+    await page.waitForTimeout(300);
+
+    const generateButton = await findGenerateButton(page);
+    if (generateButton && (await isButtonSafeForFastValidation(generateButton))) {
+      await input.fill("", { timeout: 2500 }).catch(() => undefined);
+      await page.waitForTimeout(450);
+      await generateButton.click({ timeout: 2500 }).catch(() => undefined);
+      summary.push("Triggered the empty-input state to show the validation or ready-state behavior.");
+      await page.waitForTimeout(1300);
+    }
+
+    await input.click({ timeout: 2500 }).catch(() => undefined);
+    await input.fill(repoUrl, { timeout: 2500 }).catch(() => undefined);
+    summary.push(`Entered the target URL or repository: ${repoUrl}.`);
+    await page.waitForTimeout(750);
+
+    const button = generateButton || (await findGenerateButton(page));
+    if (button) {
+      const box = await button.boundingBox().catch(() => null);
+      if (box) {
+        await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+        summary.push("Hovered the primary generate/start action without launching a long recursive job.");
+        await page.waitForTimeout(1000);
+      }
+    }
+
+    return summary;
+  }
+
+  summary.push(...(await runPublicProductFlow(page)));
+  return summary;
+}
+
+async function findRepoLikeInput(page: import("playwright").Page) {
+  const selectors = [
+    'input[placeholder*="github" i]',
+    'input[placeholder*="repo" i]',
+    'input[placeholder*="url" i]',
+    'input[name*="repo" i]',
+    'input[name*="url" i]',
+    'input[type="url"]',
+  ];
+
+  for (const selector of selectors) {
+    const locator = page.locator(selector).first();
+    if (!(await locator.count().catch(() => 0))) continue;
+    const visible = await locator.isVisible().catch(() => false);
+    const enabled = await locator.isEnabled().catch(() => false);
+    if (!visible || !enabled) continue;
+    return locator;
+  }
+
+  const fallback = page.locator("input").first();
+  if ((await fallback.count().catch(() => 0)) && (await fallback.isVisible().catch(() => false))) return fallback;
+  return null;
+}
+
+async function findGenerateButton(page: import("playwright").Page) {
+  const candidates = [
+    page.getByRole("button", { name: /generate/i }).first(),
+    page.getByRole("button", { name: /start/i }).first(),
+    page.getByRole("button", { name: /run/i }).first(),
+    page.locator("button").first(),
+  ];
+
+  for (const locator of candidates) {
+    if (!(await locator.count().catch(() => 0))) continue;
+    if ((await locator.isVisible().catch(() => false)) && (await locator.isEnabled().catch(() => false))) return locator;
+  }
+
+  return null;
+}
+
+async function isButtonSafeForFastValidation(button: import("playwright").Locator) {
+  const type = await button.getAttribute("type").catch(() => "");
+  return type === "button";
+}
+
+async function exploreVisiblePage(page: import("playwright").Page) {
+  await page.mouse.move(320, 260);
+  await page.waitForTimeout(700);
+
+  const buttons = page.locator("button");
+  const count = Math.min(await buttons.count().catch(() => 0), 3);
+  for (let index = 0; index < count; index += 1) {
+    const button = buttons.nth(index);
+    if (!(await button.isVisible().catch(() => false))) continue;
+    const box = await button.boundingBox().catch(() => null);
+    if (!box) continue;
+    await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+    await page.waitForTimeout(500);
+  }
+
+  await page.mouse.wheel(0, 420).catch(() => undefined);
+  await page.waitForTimeout(900);
+}
+
+async function runPublicProductFlow(page: import("playwright").Page) {
+  const summary: string[] = [];
+  const primary = await findPrimaryProductAction(page);
+  if (primary) {
+    const label = await primary.innerText().catch(() => "primary call to action");
+    const box = await primary.boundingBox().catch(() => null);
+    if (box) {
+      await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+      await page.waitForTimeout(500);
+    }
+    await primary.click({ timeout: 2500 }).catch(() => undefined);
+    await page.waitForLoadState("domcontentloaded", { timeout: 5000 }).catch(() => undefined);
+    await page.waitForTimeout(1200);
+    summary.push(`Clicked the primary action "${cleanInline(label)}" and showed the next product step.`);
+  }
+
+  const formInputs = page.locator("input, textarea");
+  const inputCount = await formInputs.count().catch(() => 0);
+  if (inputCount > 0) {
+    const first = formInputs.first();
+    if (await first.isVisible().catch(() => false)) {
+      await first.click({ timeout: 2500 }).catch(() => undefined);
+      await page.waitForTimeout(400);
+      summary.push("Focused the first form field on the next step.");
+    }
+
+    const submit = await findSubmitLikeButton(page);
+    if (submit && (await submit.isEnabled().catch(() => false))) {
+      const label = await submit.innerText().catch(() => "submit");
+      await submit.click({ timeout: 2500 }).catch(() => undefined);
+      await page.waitForTimeout(1200);
+      summary.push(`Clicked "${cleanInline(label)}" with empty fields to demonstrate the guarded form state.`);
+    }
+  } else {
+    await exploreVisiblePage(page);
+    summary.push("Scrolled and hovered visible product sections to show the main offering and supporting content.");
+  }
+
+  return summary.length ? summary : ["Explored the visible product page without submitting data."];
+}
+
+async function findPrimaryProductAction(page: import("playwright").Page) {
+  const labels = [
+    /create a story/i,
+    /start creating/i,
+    /get started/i,
+    /try/i,
+    /start/i,
+    /create/i,
+  ];
+
+  for (const label of labels) {
+    const locator = page.getByRole("button", { name: label }).first();
+    if ((await locator.count().catch(() => 0)) && (await locator.isVisible().catch(() => false))) return locator;
+  }
+
+  const link = page.getByRole("link", { name: /get started|start|create|try/i }).first();
+  if ((await link.count().catch(() => 0)) && (await link.isVisible().catch(() => false))) return link;
+  return null;
+}
+
+async function findSubmitLikeButton(page: import("playwright").Page) {
+  const labels = [/sign in/i, /sign up/i, /continue/i, /submit/i, /create/i, /generate/i];
+  for (const label of labels) {
+    const locator = page.getByRole("button", { name: label }).first();
+    if ((await locator.count().catch(() => 0)) && (await locator.isVisible().catch(() => false))) return locator;
+  }
+  return null;
+}
+
+function cleanInline(value: string) {
+  return value.replace(/\s+/g, " ").trim().slice(0, 80);
 }
 
 function publicUrlCandidates(repo: RepoContext, plan: DemoCapturePlan) {

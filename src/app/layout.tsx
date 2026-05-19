@@ -12,6 +12,163 @@ const geistMono = Geist_Mono({
   subsets: ["latin"],
 });
 
+const hydrationFallbackScript = String.raw`
+(() => {
+  const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+  const line = (text) => {
+    const output = document.querySelector("[data-demomaster-output]");
+    if (!output) return;
+    let panel = document.querySelector("[data-demomaster-fallback-panel]");
+    if (!panel) {
+      panel = document.createElement("section");
+      panel.className = "panel";
+      panel.setAttribute("data-demomaster-fallback-panel", "true");
+      panel.innerHTML = "<div class='panel-heading'><h2>Agent run</h2></div><div data-demomaster-fallback-log class='transcript'></div>";
+      output.prepend(panel);
+    }
+    const log = panel.querySelector("[data-demomaster-fallback-log]");
+    const item = document.createElement("p");
+    item.textContent = text;
+    log.appendChild(item);
+  };
+
+  async function postJson(url, body) {
+    const response = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(payload.error || "Request failed.");
+    return payload;
+  }
+
+  function renderResult(result) {
+    const output = document.querySelector("[data-demomaster-output]");
+    if (!output) return;
+    const capture = result.capture;
+    const pitch = result.pitch;
+    output.innerHTML = "";
+    const section = document.createElement("section");
+    section.className = "stage";
+    section.innerHTML = [
+      "<div class='stage-meta'><div>",
+      "<span class='eyebrow'>Fallback browser runner</span>",
+      "<h2>" + escapeHtml(pitch?.corePromise || "Pitch ready") + "</h2>",
+      "<p>" + escapeHtml(pitch?.positioning || "") + "</p>",
+      "</div><div class='score'>" + escapeHtml(String(pitch?.score || "")) + "</div></div>",
+      capture?.videoUrl ? "<video src='" + capture.videoUrl + "' controls muted playsinline style='width:100%;aspect-ratio:16/9;background:#111827;border-radius:8px'></video>" : "",
+      "<div class='button-row'>",
+      capture?.videoUrl ? "<a class='btn' target='_blank' rel='noreferrer' href='" + capture.videoUrl + "'>Raw capture video</a>" : "",
+      "</div>",
+      "<section class='panel'><div class='panel-heading'><h2>Transcript</h2></div><p class='transcript'>" + escapeHtml(pitch?.narration || "") + "</p></section>",
+    ].join("");
+    output.appendChild(section);
+  }
+
+  function escapeHtml(value) {
+    return String(value).replace(/[&<>"']/g, (char) => ({
+      "&": "&amp;",
+      "<": "&lt;",
+      ">": "&gt;",
+      '"': "&quot;",
+      "'": "&#39;",
+    })[char]);
+  }
+
+  async function runFallback() {
+    if (document.documentElement.dataset.demomasterNativeRunning === "true") return;
+    document.documentElement.dataset.demomasterNativeRunning = "true";
+    const input = document.querySelector("[data-demomaster-repo-input]");
+    const button = document.querySelector("[data-demomaster-generate]");
+    const repoUrl = input?.value?.trim();
+    if (!repoUrl) {
+      line("Repository URL is required.");
+      document.documentElement.dataset.demomasterNativeRunning = "false";
+      return;
+    }
+    if (button) button.setAttribute("disabled", "true");
+    try {
+      line("React hydration did not attach in time, so native fallback is running the same API flow.");
+      line("Generating pitch script, narration, and agent logs.");
+      const pitchResponse = await fetch("/api/pitch/stream", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ repoUrl }),
+      });
+      if (!pitchResponse.ok || !pitchResponse.body) throw new Error("Pitch generation failed.");
+      const reader = pitchResponse.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+      let finalResult = null;
+      while (true) {
+        const { done, value } = await reader.read();
+        buffer += decoder.decode(value || new Uint8Array(), { stream: !done });
+        const lines = buffer.split("\n");
+        buffer = lines.pop() || "";
+        for (const raw of lines) {
+          if (!raw.trim()) continue;
+          const event = JSON.parse(raw);
+          if (event.type === "status") line(event.message);
+          if (event.type === "agentLog") line(event.log.agent + " completed.");
+          if (event.type === "error") throw new Error(event.message);
+          if (event.type === "complete") finalResult = event.response;
+        }
+        if (done) break;
+      }
+      if (!finalResult) throw new Error("Generation ended before a pitch was returned.");
+
+      line("Capturing browser demo footage.");
+      const captureBody = await postJson("/api/capture", { repoUrl, capturePlan: finalResult.pitch.capturePlan });
+      finalResult.capture = captureBody.capture;
+      finalResult.agentLogs = [...(finalResult.agentLogs || []), captureBody.agentLog].filter(Boolean);
+
+      if (captureBody.capture?.status === "ready") {
+        line("Aligning script to captured footage and regenerating narration.");
+        const aligned = await postJson("/api/pitch/align", { pitch: finalResult.pitch, capture: captureBody.capture });
+        finalResult = {
+          ...finalResult,
+          pitch: aligned.pitch || finalResult.pitch,
+          audio: aligned.audio || finalResult.audio,
+          voiceQa: aligned.voiceQa || finalResult.voiceQa,
+          agentLogs: [...(finalResult.agentLogs || []), ...(aligned.agentLogs || [])],
+        };
+      }
+      line("Done. Showing captured demo and transcript.");
+      renderResult(finalResult);
+    } catch (error) {
+      line(error?.message || "Generation failed.");
+    } finally {
+      if (button) button.removeAttribute("disabled");
+      document.documentElement.dataset.demomasterNativeRunning = "false";
+    }
+  }
+
+  async function installFallback() {
+    await wait(2000);
+    if (document.documentElement.dataset.demomasterHydrated === "true") return;
+    const button = document.querySelector("[data-demomaster-generate]");
+    if (!button) return;
+    button.addEventListener("click", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      runFallback();
+    }, true);
+    const form = button.closest("form");
+    form?.addEventListener("submit", (event) => {
+      event.preventDefault();
+      runFallback();
+    }, true);
+  }
+
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", installFallback, { once: true });
+  } else {
+    installFallback();
+  }
+})();
+`;
+
 export const metadata: Metadata = {
   title: "DemoMaster",
   description: "Generate AI Agent Olympics-style narrated pitch videos from demo repositories.",
@@ -24,7 +181,10 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en" className={`${geistSans.variable} ${geistMono.variable}`} suppressHydrationWarning>
-      <body>{children}</body>
+      <body>
+        {children}
+        <script dangerouslySetInnerHTML={{ __html: hydrationFallbackScript }} />
+      </body>
     </html>
   );
 }

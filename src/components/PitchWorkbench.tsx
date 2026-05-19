@@ -99,6 +99,10 @@ export function PitchWorkbench() {
   const totalDuration = useMemo(() => (result ? getTotalDuration(result.pitch) : 0), [result]);
 
   useEffect(() => {
+    document.documentElement.dataset.demomasterHydrated = "true";
+  }, []);
+
+  useEffect(() => {
     if (!isGenerating) return;
 
     const timer = window.setInterval(() => setElapsedSeconds((value) => value + 1), 1000);
@@ -130,6 +134,12 @@ export function PitchWorkbench() {
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (isGenerating) return;
+    await startGeneration();
+  }
+
+  async function startGeneration() {
+    if (isGenerating) return;
     setIsGenerating(true);
     setElapsedSeconds(0);
     setLiveAgentLogs([]);
@@ -328,7 +338,7 @@ export function PitchWorkbench() {
   const heroStatus = isGenerating ? "Agents running" : result?.pitch.mode === "agentic" ? "Pitch ready" : result ? "Fallback ready" : "Ready";
 
   return (
-    <main className="app-shell">
+    <main className="app-shell" data-demomaster-root>
       <section className="topbar">
         <div className="brand-lockup">
           <div className="mark">
@@ -351,6 +361,7 @@ export function PitchWorkbench() {
             <label className="field">
               <span>Repository</span>
               <input
+                data-demomaster-repo-input
                 value={repoUrl}
                 onChange={(event) => setRepoUrl(event.target.value)}
                 placeholder="https://github.com/org/repo"
@@ -359,7 +370,7 @@ export function PitchWorkbench() {
             </label>
 
             <div className="button-row">
-              <button className="btn primary" type="submit" disabled={isGenerating}>
+              <button className="btn primary" type="button" onClick={startGeneration} disabled={isGenerating} data-demomaster-generate>
                 {isGenerating ? <Loader2 size={17} className="spin" /> : <Sparkles size={17} />}
                 Generate pitch video
               </button>
@@ -415,7 +426,7 @@ export function PitchWorkbench() {
           ) : null}
         </aside>
 
-        <section className="main">
+        <section className="main" data-demomaster-output>
           {result ? (
             <>
               <section className="stage">
@@ -442,7 +453,7 @@ export function PitchWorkbench() {
                     </button>
                     <button className="btn" type="button" onClick={exportVideo} disabled={isExporting}>
                       {isExporting ? <Loader2 size={17} className="spin" /> : <Download size={17} />}
-                      Export WebM
+                      Export final video
                     </button>
                   </div>
                   <div className="scrubber">
@@ -462,7 +473,7 @@ export function PitchWorkbench() {
                 {result.audio.dataUrl ? <audio ref={audioRef} src={result.audio.dataUrl} preload="auto" /> : null}
                 {exportUrl ? (
                   <a className="export-link" href={exportUrl} download={`${result.pitch.productName}-pitch.webm`}>
-                    Download exported video
+                    Download final pitch video
                   </a>
                 ) : null}
               </section>
@@ -521,7 +532,7 @@ export function PitchWorkbench() {
                       {result.capture?.videoUrl ? (
                         <a href={result.capture.videoUrl} target="_blank" rel="noreferrer">
                           <ExternalLink size={14} />
-                          Capture video
+                          Raw capture video
                         </a>
                       ) : null}
                     </div>
