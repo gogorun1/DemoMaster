@@ -6,6 +6,7 @@ import {
   Camera,
   CheckCircle2,
   Code2,
+  Copy,
   Download,
   ExternalLink,
   FileText,
@@ -33,6 +34,10 @@ export function PitchWorkbench() {
   const [isExporting, setIsExporting] = useState(false);
   const [isStartingCapture, setIsStartingCapture] = useState(false);
   const [isDestroyingCapture, setIsDestroyingCapture] = useState(false);
+  const [isPreparingManualRunner, setIsPreparingManualRunner] = useState(false);
+  const [isAttachingManualRunner, setIsAttachingManualRunner] = useState(false);
+  const [manualCloudInit, setManualCloudInit] = useState("");
+  const [manualStatusUrl, setManualStatusUrl] = useState("");
   const [error, setError] = useState("");
   const [exportUrl, setExportUrl] = useState("");
   const audioRef = useRef<HTMLAudioElement>(null);
@@ -154,6 +159,53 @@ export function PitchWorkbench() {
     }
   }
 
+  async function prepareManualRunner() {
+    if (!result) return;
+    setIsPreparingManualRunner(true);
+    setError("");
+    try {
+      const response = await fetch("/api/vultr/manual", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ repoUrl, capturePlan: result.pitch.capturePlan }),
+      });
+      const body = (await response.json()) as { cloudInit?: string; statusUrl?: string; agentLog?: AgentLog; error?: string };
+      if (!response.ok) throw new Error(body.error || "Could not prepare manual Vultr runner.");
+      setManualCloudInit(body.cloudInit || "");
+      setManualStatusUrl((current) => current || body.statusUrl || "");
+      if (body.agentLog) updateAgentLog(body.agentLog);
+    } catch (manualError) {
+      setError(manualError instanceof Error ? manualError.message : "Could not prepare manual Vultr runner.");
+    } finally {
+      setIsPreparingManualRunner(false);
+    }
+  }
+
+  async function attachManualRunner() {
+    if (!manualStatusUrl.trim()) return;
+    setIsAttachingManualRunner(true);
+    setError("");
+    try {
+      const response = await fetch("/api/vultr/manual-status", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ statusUrl: manualStatusUrl }),
+      });
+      const body = (await response.json()) as { capture?: DemoCaptureResult; agentLog?: AgentLog; error?: string };
+      if (!response.ok) throw new Error(body.error || "Could not attach manual Vultr runner.");
+      updateCapture(body.capture, body.agentLog);
+    } catch (manualError) {
+      setError(manualError instanceof Error ? manualError.message : "Could not attach manual Vultr runner.");
+    } finally {
+      setIsAttachingManualRunner(false);
+    }
+  }
+
+  async function copyManualCloudInit() {
+    if (!manualCloudInit) return;
+    await navigator.clipboard?.writeText(manualCloudInit).catch(() => undefined);
+  }
+
   function updateCapture(capture?: DemoCaptureResult, agentLog?: AgentLog) {
     if (!capture) return;
     setResult((current) => {
@@ -162,6 +214,16 @@ export function PitchWorkbench() {
         ...current,
         capture,
         agentLogs: agentLog ? upsertAgentLog(current.agentLogs, agentLog) : current.agentLogs,
+      };
+    });
+  }
+
+  function updateAgentLog(agentLog: AgentLog) {
+    setResult((current) => {
+      if (!current) return current;
+      return {
+        ...current,
+        agentLogs: upsertAgentLog(current.agentLogs, agentLog),
       };
     });
   }
@@ -430,6 +492,42 @@ export function PitchWorkbench() {
                           {isDestroyingCapture ? <Loader2 size={17} className="spin" /> : <Trash2 size={17} />}
                           Destroy VM
                         </button>
+                      ) : null}
+                    </div>
+                    <div className="manual-runner">
+                      <div className="manual-runner-head">
+                        <div>
+                          <strong>Manual Vultr runner</strong>
+                          <p>Use this when the hackathon account blocks API access but still allows Console Compute.</p>
+                        </div>
+                        <button className="btn" type="button" onClick={prepareManualRunner} disabled={isPreparingManualRunner}>
+                          {isPreparingManualRunner ? <Loader2 size={17} className="spin" /> : <Code2 size={17} />}
+                          Prepare
+                        </button>
+                      </div>
+                      {manualCloudInit ? (
+                        <>
+                          <div className="button-row">
+                            <button className="btn" type="button" onClick={copyManualCloudInit}>
+                              <Copy size={17} />
+                              Copy cloud-init
+                            </button>
+                          </div>
+                          <textarea className="manual-script" value={manualCloudInit} readOnly spellCheck={false} />
+                          <label className="field compact-field">
+                            <span>Status URL</span>
+                            <input
+                              value={manualStatusUrl}
+                              onChange={(event) => setManualStatusUrl(event.target.value)}
+                              placeholder="http://203.0.113.10:8090/status.json"
+                              spellCheck={false}
+                            />
+                          </label>
+                          <button className="btn primary" type="button" onClick={attachManualRunner} disabled={isAttachingManualRunner}>
+                            {isAttachingManualRunner ? <Loader2 size={17} className="spin" /> : <RefreshCcw size={17} />}
+                            Attach manual runner
+                          </button>
+                        </>
                       ) : null}
                     </div>
                     {result.capture ? (
