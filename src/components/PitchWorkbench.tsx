@@ -18,7 +18,7 @@ import {
   Trophy,
 } from "lucide-react";
 import { VideoCanvas } from "@/components/VideoCanvas";
-import { drawPitchFrame, getTotalDuration } from "@/lib/render-frame";
+import { drawPitchFrame, getDemoPlaybackTime, getSceneAtTime, getTotalDuration, isDemoScene } from "@/lib/render-frame";
 import type { AgentLog, AgentLogEntry, AgentName, DemoCaptureResult, PitchResponse } from "@/lib/types";
 
 const sampleRepo = "https://github.com/vercel/ai-chatbot";
@@ -803,12 +803,14 @@ async function drawExportFrames(
   const captureVideo = captureMedia instanceof HTMLVideoElement ? captureMedia : undefined;
   if (captureVideo) {
     captureVideo.currentTime = 0;
-    await captureVideo.play().catch(() => undefined);
+    captureVideo.pause();
   }
   const startedAt = performance.now();
+  const playbackState = { active: false };
   await new Promise<void>((resolve) => {
     const draw = (now: number) => {
       const elapsed = Math.min(duration, (now - startedAt) / 1000);
+      if (captureVideo) syncExportVideo(captureVideo, result.pitch, elapsed, playbackState);
       drawPitchFrame(context, result.pitch, elapsed, captureMedia);
       if (elapsed >= duration) resolve();
       else requestAnimationFrame(draw);
@@ -816,6 +818,41 @@ async function drawExportFrames(
     requestAnimationFrame(draw);
   });
   captureVideo?.pause();
+}
+
+function syncExportVideo(
+  video: HTMLVideoElement,
+  plan: PitchResponse["pitch"],
+  currentTime: number,
+  playbackState: { active: boolean },
+) {
+  const scene = getSceneAtTime(plan, currentTime);
+  if (!isDemoScene(scene)) {
+    video.pause();
+    playbackState.active = false;
+    if (currentTime < firstDemoStart(plan) && Number.isFinite(video.duration) && video.duration > 0 && video.currentTime > 0.1) video.currentTime = 0;
+    return;
+  }
+
+  if (Number.isFinite(video.duration) && video.duration > 0) {
+    const demoDuration = Math.max(1, lastDemoEnd(plan) - firstDemoStart(plan));
+    video.playbackRate = Math.max(0.1, Math.min(1, video.duration / demoDuration));
+    if (!playbackState.active) {
+      video.currentTime = getDemoPlaybackTime(plan, currentTime, video.duration);
+      playbackState.active = true;
+    }
+  }
+  void video.play().catch(() => undefined);
+}
+
+function firstDemoStart(plan: PitchResponse["pitch"]) {
+  return plan.scenes.find(isDemoScene)?.start ?? 0;
+}
+
+function lastDemoEnd(plan: PitchResponse["pitch"]) {
+  const demoScenes = plan.scenes.filter(isDemoScene);
+  const last = demoScenes.at(-1);
+  return last ? last.start + last.duration : firstDemoStart(plan) + 1;
 }
 
 function pickRecordingMimeType() {

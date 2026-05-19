@@ -9,7 +9,7 @@ export const runtime = "nodejs";
 export const maxDuration = 300;
 
 const DEFAULT_REPO_CONTEXT_TIMEOUT_MS = 15000;
-const DEFAULT_AUDIO_TIMEOUT_MS = 45000;
+const DEFAULT_AUDIO_TIMEOUT_MS = 120000;
 
 export async function POST(request: Request) {
   try {

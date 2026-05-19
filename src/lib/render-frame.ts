@@ -20,6 +20,21 @@ export function getSceneAtTime(plan: PitchPlan, time: number) {
   );
 }
 
+export function isDemoScene(scene: PitchScene) {
+  return ["product", "workflow", "evidence"].includes(scene.visual);
+}
+
+export function getDemoPlaybackTime(plan: PitchPlan, time: number, mediaDuration: number) {
+  if (!Number.isFinite(mediaDuration) || mediaDuration <= 0) return 0;
+  const demoScenes = plan.scenes.filter(isDemoScene);
+  if (!demoScenes.length) return 0;
+  const start = demoScenes[0].start;
+  const lastScene = demoScenes[demoScenes.length - 1];
+  const end = lastScene.start + lastScene.duration;
+  const progress = Math.min(1, Math.max(0, (time - start) / Math.max(1, end - start)));
+  return Math.min(mediaDuration - 0.05, Math.max(0, progress * mediaDuration));
+}
+
 export function drawPitchFrame(
   ctx: CanvasRenderingContext2D,
   plan: PitchPlan,
@@ -33,11 +48,95 @@ export function drawPitchFrame(
   const colors = palette[scene.visual] ?? palette.workflow;
 
   ctx.clearRect(0, 0, width, height);
+  if (captureImage && isDemoScene(scene)) {
+    drawFullscreenDemo(ctx, plan, scene, sceneProgress, time, total, width, height, colors, captureImage);
+    return;
+  }
+
   drawBackground(ctx, width, height, colors);
   drawHeader(ctx, plan, time, total, width);
   drawVisual(ctx, scene, sceneProgress, width, height, colors, captureImage);
   drawCopy(ctx, plan, scene, sceneProgress, width, height, colors);
   drawTimeline(ctx, plan, time, width, height);
+}
+
+function drawFullscreenDemo(
+  ctx: CanvasRenderingContext2D,
+  plan: PitchPlan,
+  scene: PitchScene,
+  progress: number,
+  time: number,
+  total: number,
+  width: number,
+  height: number,
+  colors: { primary: string; accent: string; secondary: string },
+  captureImage: CanvasImageSource,
+) {
+  drawImageCover(ctx, captureImage, 0, 0, width, height);
+
+  const topGradient = ctx.createLinearGradient(0, 0, 0, 160);
+  topGradient.addColorStop(0, "rgba(2,6,23,0.78)");
+  topGradient.addColorStop(1, "rgba(2,6,23,0)");
+  ctx.fillStyle = topGradient;
+  ctx.fillRect(0, 0, width, 160);
+
+  const bottomGradient = ctx.createLinearGradient(0, height - 290, 0, height);
+  bottomGradient.addColorStop(0, "rgba(2,6,23,0)");
+  bottomGradient.addColorStop(0.28, "rgba(2,6,23,0.72)");
+  bottomGradient.addColorStop(1, "rgba(2,6,23,0.92)");
+  ctx.fillStyle = bottomGradient;
+  ctx.fillRect(0, height - 290, width, 290);
+
+  ctx.fillStyle = "rgba(15,23,42,0.72)";
+  roundRect(ctx, 48, 34, width - 96, 58, 8);
+  ctx.fill();
+
+  ctx.fillStyle = "#f8fafc";
+  ctx.font = "750 24px Geist, Arial, sans-serif";
+  ctx.fillText(plan.productName, 72, 70);
+
+  ctx.fillStyle = colors.accent;
+  ctx.font = "700 15px Geist Mono, monospace";
+  ctx.textAlign = "right";
+  ctx.fillText("FULLSCREEN DEMO", width - 72, 69);
+  ctx.textAlign = "left";
+
+  const panelWidth = Math.min(980, width - 96);
+  const panelX = 48;
+  const panelY = height - 214;
+  ctx.fillStyle = "rgba(15,23,42,0.76)";
+  roundRect(ctx, panelX, panelY, panelWidth, 142, 8);
+  ctx.fill();
+  ctx.strokeStyle = "rgba(255,255,255,0.16)";
+  ctx.lineWidth = 1;
+  ctx.stroke();
+
+  ctx.fillStyle = colors.accent;
+  ctx.font = "700 15px Geist Mono, monospace";
+  ctx.fillText(scene.title.toUpperCase(), panelX + 24, panelY + 34);
+
+  ctx.fillStyle = "#ffffff";
+  ctx.font = "800 34px Geist, Arial, sans-serif";
+  const headline = wrapText(ctx, scene.onScreenText || scene.beat, panelWidth - 48, 2);
+  headline.forEach((line, index) => ctx.fillText(line, panelX + 24, panelY + 78 + index * 38));
+
+  ctx.fillStyle = "#dbe4f0";
+  ctx.font = "600 18px Geist, Arial, sans-serif";
+  const narration = wrapText(ctx, scene.narration, width - 210, 2);
+  narration.forEach((line, index) => ctx.fillText(line, 72, height - 58 + index * 24));
+
+  ctx.fillStyle = "rgba(255,255,255,0.22)";
+  roundRect(ctx, 48, height - 18, width - 96, 6, 3);
+  ctx.fill();
+  ctx.fillStyle = colors.primary;
+  roundRect(ctx, 48, height - 18, (width - 96) * progress, 6, 3);
+  ctx.fill();
+
+  ctx.fillStyle = "#cbd5e1";
+  ctx.font = "650 14px Geist Mono, monospace";
+  ctx.textAlign = "right";
+  ctx.fillText(`${Math.round(Math.min(time, total))}s / ${Math.round(total)}s`, width - 48, height - 54);
+  ctx.textAlign = "left";
 }
 
 function drawBackground(

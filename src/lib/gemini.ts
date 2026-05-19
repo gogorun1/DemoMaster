@@ -271,8 +271,9 @@ export async function alignPitchWithCapture(
 ): Promise<{ pitch: PitchPlan; agentLog: AgentLog }> {
   const client = getGeminiClient();
   if (!client || capture.status !== "ready" || !capture.screenshotUrl) {
+    const pitch = localCaptureAlignedPitch(plan, capture);
     return {
-      pitch: plan,
+      pitch,
       agentLog: {
         agent: "Capture Alignment Agent",
         provider: "gemini",
@@ -281,7 +282,7 @@ export async function alignPitchWithCapture(
             step: "Check capture material",
             status: "skipped",
             message: capture.screenshotUrl
-              ? "Capture alignment skipped because Gemini is not configured."
+              ? "Capture alignment used the recorded interaction summary because Gemini is not configured."
               : "Capture alignment skipped because no completed capture screenshot was available.",
           },
         ],
@@ -294,15 +295,23 @@ export async function alignPitchWithCapture(
     const imagePart = await screenshotPart(capture.screenshotUrl, requestUrl);
     const prompt = [
       "You are the Capture Alignment Agent inside DemoMaster.",
-      "Rewrite the final pitch script so it corresponds to the actual captured product footage.",
-      "The attached image is a representative frame from the browser recording. The final export will place this captured footage in product/workflow/evidence scenes.",
+      "Rewrite the final pitch script after the browser recording has been captured.",
+      "The attached image is a representative frame from the browser recording, and the interaction summary is the source of truth for the demo walkthrough.",
+      "The final video renderer has two fullscreen modes only: deck scenes are fullscreen slides, and demo scenes are fullscreen browser footage with a small caption overlay. Do not write for picture-in-picture.",
       "Rules:",
-      "- Keep the same number of scenes and roughly the same durations.",
+      "- Keep the same number of scenes, but redesign the structure.",
+      "- Scene 1 is a fullscreen deck scene that defines the user problem and why the product matters.",
+      "- Middle scenes are the main body and must be fullscreen demo walkthrough scenes. They should describe the actual recorded operations in order.",
+      "- The final scene is a fullscreen deck scene that summarizes the value and ends cleanly.",
+      "- At least 65% of the total runtime should be demo walkthrough scenes.",
+      "- Use visual='problem' for the opening, visual='close' for the ending, and visual='product', 'workflow', or 'evidence' for every middle demo scene.",
       "- Do not invent UI features that are not visible in the capture or grounded by the existing script.",
-      "- At least three scenes should explicitly match the captured app surface, layout, interaction, or output state.",
+      "- Every middle scene should explicitly match the captured app surface, layout, interaction, or output state.",
       "- Scene narration must follow the recorded interaction order when an interaction summary is provided.",
       "- If the recording stops at a login, signup, pricing, or setup step, say that clearly instead of claiming the final generation completed.",
-      "- Keep the script concise and high-quality; this is still a product pitch, not a literal screen reader.",
+      "- Write the demo section after the capture: describe what is happening on screen, why that operation matters, and what it proves.",
+      "- Keep the opening and ending concise; put most words and time into the demo walkthrough.",
+      "- Keep the script high-quality; this is still a product pitch, not a literal screen reader.",
       "- Return strict JSON only with keys corePromise, positioning, cta, insights, scenes.",
       "",
       `Capture target URL: ${capture.targetUrl || "unknown"}`,
@@ -348,14 +357,15 @@ export async function alignPitchWithCapture(
           {
             step: "Rewrite final script",
             status: "done",
-            message: "Updated narration and captions so product/workflow/evidence scenes correspond to the captured UI.",
+            message: "Rebuilt the script as a problem opener, fullscreen demo walkthrough, and concise summary close.",
           },
         ],
       },
     };
   } catch (error) {
+    const pitch = localCaptureAlignedPitch(plan, capture);
     return {
-      pitch: plan,
+      pitch,
       agentLog: {
         agent: "Capture Alignment Agent",
         provider: "gemini",
@@ -363,7 +373,7 @@ export async function alignPitchWithCapture(
           {
             step: "Align script with capture",
             status: "error",
-            message: friendlyProviderError(error, "Capture alignment failed; kept the original script."),
+            message: friendlyProviderError(error, "Capture alignment failed; used the recorded interaction summary to keep the script demo-led."),
           },
         ],
       },
@@ -446,9 +456,11 @@ async function runCreativeDirector(
       [
         "Write the final narrated pitch video plan.",
         "The video should feel like a strong internet product pitch, but without hype or fake claims.",
-        "Open with an aha moment within 15 seconds.",
+        "Use this story shape: brief problem opener, demo-heavy middle, concise summary close.",
+        "The demo-heavy middle will be rewritten after browser capture, so leave room for operation-specific narration.",
+        "Open with the problem within 10 seconds.",
         "Use short on-screen text and one main claim per scene.",
-        "Include a presenter-style scene that can look like a person speaking to camera.",
+        "Do not rely on picture-in-picture; deck scenes and demo scenes should each work fullscreen.",
         "Keep total duration between 45 and 70 seconds.",
         "Also produce a product/UX report explaining why this product and flow make sense.",
         "Also produce a demo capture plan that tries a public hosted demo URL first, then a temporary local runner if needed.",
@@ -988,10 +1000,24 @@ function normalizePitchPlan(
 
 function normalizeCaptureAlignedPitch(plan: PitchPlan, aligned: CaptureAlignedPitch): PitchPlan {
   let cursor = 0;
+  const lastIndex = plan.scenes.length - 1;
   const scenes = plan.scenes.map((scene, index) => {
     const next = aligned.scenes?.[index];
-    const visual = next?.visual && VISUALS.includes(next.visual) ? next.visual : scene.visual;
-    const duration = clamp(Number(next?.duration) || scene.duration, 7, 16);
+    const isDemoScene = index > 0 && index < lastIndex;
+    const requestedVisual = next?.visual && VISUALS.includes(next.visual) ? next.visual : scene.visual;
+    const visual =
+      index === 0
+        ? "problem"
+        : index === lastIndex
+          ? "close"
+          : ["product", "workflow", "evidence"].includes(requestedVisual)
+            ? requestedVisual
+            : index % 3 === 1
+              ? "product"
+              : index % 3 === 2
+                ? "workflow"
+                : "evidence";
+    const duration = clamp(Number(next?.duration) || scene.duration, isDemoScene ? 11 : 7, isDemoScene ? 20 : 12);
     const normalized = {
       ...scene,
       title: cleanString(next?.title) || scene.title,
@@ -1016,6 +1042,83 @@ function normalizeCaptureAlignedPitch(plan: PitchPlan, aligned: CaptureAlignedPi
     narration: scenes.map((scene) => scene.narration).join(" "),
     generatedAt: new Date().toISOString(),
   };
+}
+
+function localCaptureAlignedPitch(plan: PitchPlan, capture: DemoCaptureResult): PitchPlan {
+  if (capture.status !== "ready") return plan;
+
+  const steps = cleanStringArray(capture.interactionSummary || []);
+  const lastIndex = plan.scenes.length - 1;
+  let cursor = 0;
+  const scenes = plan.scenes.map((scene, index) => {
+    const isOpening = index === 0;
+    const isClosing = index === lastIndex;
+    const demoIndex = Math.max(0, index - 1);
+    const step = steps[demoIndex] || steps[steps.length - 1] || capture.message;
+    const visual: VisualMode = isOpening
+      ? "problem"
+      : isClosing
+        ? "close"
+        : index % 3 === 1
+          ? "product"
+          : index % 3 === 2
+            ? "workflow"
+            : "evidence";
+    const duration = isOpening || isClosing ? 8 : 15;
+    const narration = isOpening
+      ? `${plan.productName} starts with the problem every demo team knows: the product may work, but the story only becomes convincing when the viewer sees the real flow.`
+      : isClosing
+        ? `That is the value of ${plan.productName}: a pitch that starts with the problem, spends most of its time on real product behavior, and ends with a clear reason to believe.`
+        : demoNarration(step, demoIndex, plan.productName);
+    const normalized = {
+      ...scene,
+      title: isOpening ? "The Problem" : isClosing ? "What It Proves" : demoTitle(step, demoIndex),
+      beat: isOpening
+        ? "Define the need before showing the product."
+        : isClosing
+          ? "Summarize the outcome after the walkthrough."
+          : step,
+      narration,
+      onScreenText: isOpening ? "A demo needs proof, not just claims." : isClosing ? "Problem, proof, outcome." : demoOnScreenText(step, demoIndex),
+      visual,
+      duration,
+      start: cursor,
+    };
+    cursor += duration;
+    return normalized;
+  });
+
+  return {
+    ...plan,
+    scenes,
+    narration: scenes.map((scene) => scene.narration).join(" "),
+    generatedAt: new Date().toISOString(),
+  };
+}
+
+function demoNarration(step: string, index: number, productName: string) {
+  const lead = ["First", "Next", "Then", "Finally"][Math.min(index, 3)];
+  const cleanStep = step.replace(/\.$/, "");
+  if (/login|sign in|sign up|pricing|setup/i.test(step)) {
+    return `${lead}, the recording shows that ${cleanStep.toLowerCase()}. ${productName} does not pretend the workflow is complete here; it uses this guarded step as proof of the real user path and boundary.`;
+  }
+  return `${lead}, the recording shows that ${cleanStep.toLowerCase()}. This is the useful part of the pitch: the narration follows the actual operation on screen instead of describing an abstract feature list.`;
+}
+
+function demoTitle(step: string, index: number) {
+  if (/open|load|live product/i.test(step)) return "Open The Product";
+  if (/click|primary action|create|get started|start/i.test(step)) return "Follow The Main Action";
+  if (/field|form|input|focus/i.test(step)) return "Enter The Workflow";
+  if (/guard|empty|validation|sign in|sign up/i.test(step)) return "Show The Boundary";
+  return `Demo Step ${index + 1}`;
+}
+
+function demoOnScreenText(step: string, index: number) {
+  if (/open|load|live product/i.test(step)) return "Start from the real product.";
+  if (/click|primary action|create|get started|start/i.test(step)) return "The main action moves the story.";
+  if (/field|form|input|focus/i.test(step)) return "The flow asks for the next user input.";
+  if (/guard|empty|validation|sign in|sign up/i.test(step)) return "A real demo shows its boundaries.";
+  return `Recorded operation ${index + 1}.`;
 }
 
 function normalizeCapturePlan(

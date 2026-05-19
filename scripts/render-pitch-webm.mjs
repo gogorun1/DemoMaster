@@ -20,7 +20,8 @@ await mkdir(outputDir, { recursive: true });
 const browser = await chromium.launch({ headless: true });
 const page = await browser.newPage({ viewport: { width: 1280, height: 720 } });
 page.setDefaultTimeout(120000);
-await page.goto(baseUrl, { waitUntil: "domcontentloaded" });
+const renderOriginUrl = result.capture?.screenshotUrl ? new URL(result.capture.screenshotUrl, baseUrl).toString() : baseUrl;
+await page.goto(renderOriginUrl, { waitUntil: "domcontentloaded" });
 
 const base64 = await page.evaluate(
   async ({ result, baseUrl }) => {
@@ -33,6 +34,12 @@ const base64 = await page.evaluate(
       const scene = scenes.find((item) => time >= item.start && time < item.start + item.duration) || scenes.at(-1) || {};
       const local = Math.max(0, time - Number(scene.start || 0));
       const progress = Math.min(1, local / Math.max(1, Number(scene.duration || 1)));
+      const isDemoScene = ["product", "workflow", "evidence"].includes(scene.visual);
+
+      if (captureMedia && isDemoScene) {
+        drawFullscreenDemo(ctx, width, height, result, scene, time, progress, captureMedia);
+        return;
+      }
 
       const gradient = ctx.createLinearGradient(0, 0, width, height);
       gradient.addColorStop(0, "#111827");
@@ -51,20 +58,13 @@ const base64 = await page.evaluate(
       ctx.fillStyle = "#94a3b8";
       ctx.fillText("Generated pitch video", 72, 118);
 
-      const mediaRect = scene.visual === "presenter" || scene.visual === "problem"
-        ? { x: 718, y: 142, w: 466, h: 300 }
-        : { x: 560, y: 130, w: 624, h: 352 };
-      drawMedia(ctx, captureMedia, mediaRect.x, mediaRect.y, mediaRect.w, mediaRect.h);
-
-      const copyX = 72;
-      const copyW = scene.visual === "presenter" || scene.visual === "problem" ? 560 : 430;
       ctx.fillStyle = "#ffffff";
-      ctx.font = "800 52px system-ui, -apple-system, BlinkMacSystemFont, sans-serif";
-      wrapText(ctx, scene.onScreenText || scene.title || pitch.corePromise || "", copyX, 220, copyW, 60, 3);
+      ctx.font = "850 64px system-ui, -apple-system, BlinkMacSystemFont, sans-serif";
+      wrapText(ctx, scene.onScreenText || scene.title || pitch.corePromise || "", 72, 230, 900, 72, 3);
 
       ctx.fillStyle = "#cbd5e1";
-      ctx.font = "500 23px system-ui, -apple-system, BlinkMacSystemFont, sans-serif";
-      wrapText(ctx, scene.narration || pitch.positioning || "", 72, 490, 760, 34, 3);
+      ctx.font = "550 25px system-ui, -apple-system, BlinkMacSystemFont, sans-serif";
+      wrapText(ctx, scene.narration || pitch.positioning || "", 72, 494, 960, 36, 3);
 
       ctx.fillStyle = "rgba(59,130,246,0.95)";
       ctx.fillRect(72, 624, (width - 144) * progress, 6);
@@ -76,32 +76,75 @@ const base64 = await page.evaluate(
       ctx.fillText(`${scene.title || "Scene"} · ${Math.round(time)}s`, 72, 662);
     }
 
-    function drawMedia(ctx, media, x, y, w, h) {
-      ctx.save();
-      ctx.fillStyle = "#020617";
-      roundRect(ctx, x, y, w, h, 16);
-      ctx.fill();
-      ctx.clip();
-      if (media) {
-        const sourceW = media.videoWidth || media.naturalWidth || w;
-        const sourceH = media.videoHeight || media.naturalHeight || h;
-        const scale = Math.min(w / sourceW, h / sourceH);
-        const drawW = sourceW * scale;
-        const drawH = sourceH * scale;
-        ctx.drawImage(media, x + (w - drawW) / 2, y + (h - drawH) / 2, drawW, drawH);
-      } else {
-        ctx.fillStyle = "#1e293b";
-        ctx.fillRect(x, y, w, h);
-        ctx.fillStyle = "#94a3b8";
-        ctx.font = "700 22px system-ui, -apple-system, BlinkMacSystemFont, sans-serif";
-        ctx.fillText("Demo capture", x + 34, y + 64);
-      }
-      ctx.restore();
+    function drawFullscreenDemo(ctx, width, height, result, scene, time, progress, media) {
+      drawImageCover(ctx, media, 0, 0, width, height);
 
+      const topGradient = ctx.createLinearGradient(0, 0, 0, 150);
+      topGradient.addColorStop(0, "rgba(15,23,42,0.82)");
+      topGradient.addColorStop(1, "rgba(15,23,42,0)");
+      ctx.fillStyle = topGradient;
+      ctx.fillRect(0, 0, width, 150);
+
+      const bottomGradient = ctx.createLinearGradient(0, height - 300, 0, height);
+      bottomGradient.addColorStop(0, "rgba(15,23,42,0)");
+      bottomGradient.addColorStop(0.36, "rgba(15,23,42,0.72)");
+      bottomGradient.addColorStop(1, "rgba(15,23,42,0.94)");
+      ctx.fillStyle = bottomGradient;
+      ctx.fillRect(0, height - 300, width, 300);
+
+      ctx.fillStyle = "rgba(15,23,42,0.72)";
+      roundRect(ctx, 48, 34, width - 96, 58, 10);
+      ctx.fill();
+      ctx.fillStyle = "#f8fafc";
+      ctx.font = "750 26px system-ui, -apple-system, BlinkMacSystemFont, sans-serif";
+      ctx.fillText(result.pitch.productName || "Demo", 72, 71);
+      ctx.fillStyle = "#bfdbfe";
+      ctx.font = "700 15px ui-monospace, SFMono-Regular, Menlo, monospace";
+      ctx.textAlign = "right";
+      ctx.fillText("FULLSCREEN DEMO", width - 72, 70);
+      ctx.textAlign = "left";
+
+      ctx.fillStyle = "rgba(15,23,42,0.78)";
+      roundRect(ctx, 48, height - 220, Math.min(1000, width - 96), 146, 10);
+      ctx.fill();
       ctx.strokeStyle = "rgba(255,255,255,0.16)";
-      ctx.lineWidth = 1;
-      roundRect(ctx, x, y, w, h, 16);
       ctx.stroke();
+
+      ctx.fillStyle = "#bfdbfe";
+      ctx.font = "700 15px ui-monospace, SFMono-Regular, Menlo, monospace";
+      ctx.fillText((scene.title || "Demo").toUpperCase(), 72, height - 184);
+      ctx.fillStyle = "#ffffff";
+      ctx.font = "850 36px system-ui, -apple-system, BlinkMacSystemFont, sans-serif";
+      wrapText(ctx, scene.onScreenText || scene.beat || "Recorded product flow", 72, height - 136, 930, 40, 2);
+
+      ctx.fillStyle = "#dbeafe";
+      ctx.font = "600 19px system-ui, -apple-system, BlinkMacSystemFont, sans-serif";
+      wrapText(ctx, scene.narration || "", 72, height - 58, width - 220, 24, 2);
+
+      ctx.fillStyle = "rgba(255,255,255,0.2)";
+      roundRect(ctx, 48, height - 18, width - 96, 6, 3);
+      ctx.fill();
+      ctx.fillStyle = "rgba(59,130,246,0.96)";
+      roundRect(ctx, 48, height - 18, (width - 96) * progress, 6, 3);
+      ctx.fill();
+
+      const total = (result.pitch.scenes || []).reduce((sum, item) => sum + Number(item.duration || 0), 0) || 1;
+      ctx.fillStyle = "#cbd5e1";
+      ctx.font = "650 14px ui-monospace, SFMono-Regular, Menlo, monospace";
+      ctx.textAlign = "right";
+      ctx.fillText(`${Math.round(Math.min(time, total))}s / ${Math.round(total)}s`, width - 48, height - 54);
+      ctx.textAlign = "left";
+    }
+
+    function drawImageCover(ctx, media, x, y, w, h) {
+      const sourceW = media.videoWidth || media.naturalWidth || w;
+      const sourceH = media.videoHeight || media.naturalHeight || h;
+      const scale = Math.max(w / sourceW, h / sourceH);
+      const sw = w / scale;
+      const sh = h / scale;
+      const sx = (sourceW - sw) / 2;
+      const sy = (sourceH - sh) / 2;
+      ctx.drawImage(media, sx, sy, sw, sh, x, y, w, h);
     }
 
     function wrapText(ctx, text, x, y, maxWidth, lineHeight, maxLines) {
@@ -172,6 +215,43 @@ const base64 = await page.evaluate(
       return btoa(binary);
     }
 
+    function syncCaptureVideo(video, scenes, time, playbackState) {
+      if (!video) return;
+      const scene = scenes.find((item) => time >= item.start && time < item.start + item.duration) || scenes.at(-1) || {};
+      if (!["product", "workflow", "evidence"].includes(scene.visual)) {
+        video.pause();
+        playbackState.active = false;
+        if (time < getDemoWindow(scenes).start && Number.isFinite(video.duration) && video.duration > 0 && video.currentTime > 0.1) video.currentTime = 0;
+        return;
+      }
+
+      if (Number.isFinite(video.duration) && video.duration > 0) {
+        const demoWindow = getDemoWindow(scenes);
+        const demoDuration = Math.max(1, demoWindow.end - demoWindow.start);
+        video.playbackRate = Math.max(0.1, Math.min(1, video.duration / demoDuration));
+        if (!playbackState.active) {
+          video.currentTime = getDemoPlaybackTime(scenes, time, video.duration);
+          playbackState.active = true;
+        }
+      }
+      video.play().catch(() => undefined);
+    }
+
+    function getDemoPlaybackTime(scenes, time, mediaDuration) {
+      const { start, end } = getDemoWindow(scenes);
+      if (!Number.isFinite(mediaDuration) || mediaDuration <= 0) return 0;
+      const progress = Math.min(1, Math.max(0, (time - start) / Math.max(1, end - start)));
+      return Math.min(mediaDuration - 0.05, Math.max(0, progress * mediaDuration));
+    }
+
+    function getDemoWindow(scenes) {
+      const demoScenes = scenes.filter((item) => ["product", "workflow", "evidence"].includes(item.visual));
+      if (!demoScenes.length) return { start: 0, end: 1 };
+      const start = Number(demoScenes[0].start || 0);
+      const last = demoScenes[demoScenes.length - 1];
+      return { start, end: Number(last.start || 0) + Number(last.duration || 0) };
+    }
+
     const canvas = document.getElementById("stage");
     const ctx = canvas.getContext("2d");
     if (!ctx) throw new Error("Canvas context unavailable.");
@@ -188,7 +268,7 @@ const base64 = await page.evaluate(
     if (captureVideo) {
       captureVideo.loop = true;
       captureVideo.muted = true;
-      await captureVideo.play().catch(() => undefined);
+      captureVideo.pause();
     }
 
     const stream = canvas.captureStream(30);
@@ -219,9 +299,11 @@ const base64 = await page.evaluate(
     source?.start();
 
     const started = performance.now();
+    const playbackState = { active: false };
     await new Promise((resolve) => {
       const frame = (now) => {
         const time = Math.min(duration, (now - started) / 1000);
+        syncCaptureVideo(captureVideo, scenes, time, playbackState);
         drawFrame(ctx, width, height, result, time, captureVideo || captureImage);
         if (time >= duration) resolve();
         else requestAnimationFrame(frame);
