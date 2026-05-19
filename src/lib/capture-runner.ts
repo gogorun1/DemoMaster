@@ -540,6 +540,7 @@ function cleanInline(value: string) {
 
 function publicUrlCandidates(repo: RepoContext, plan: DemoCapturePlan) {
   const urls = [
+    repo.repoUrl,
     plan.targetUrl,
     repo.homepage,
     ...repo.files.flatMap((file) => extractUrls(file.content)),
