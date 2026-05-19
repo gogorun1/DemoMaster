@@ -208,6 +208,19 @@ export function fallbackAgentLogs(repo: RepoContext): AgentLog[] {
       ],
     },
     {
+      agent: "Open Model Critic Agent",
+      provider: "featherless",
+      entries: [
+        {
+          step: "Check Featherless",
+          status: "skipped",
+          message: process.env.FEATHERLESS_API_KEY
+            ? "Featherless critique is configured, but the fallback path did not create an agentic draft to critique."
+            : "Set FEATHERLESS_API_KEY to enable the independent open-model critic.",
+        },
+      ],
+    },
+    {
       agent: "Quality Judge Agent",
       provider: "gemini",
       entries: [
@@ -233,17 +246,19 @@ export function buildPartnerStack(hasGemini: boolean): PartnerCapability[] {
     },
     {
       name: "Featherless",
-      role: "optional open-model critic for second-opinion judging",
+      role: "independent open-model critic agent",
       status: process.env.FEATHERLESS_API_KEY ? "ready" : "optional",
       detail: process.env.FEATHERLESS_API_KEY
-        ? "Configured through FEATHERLESS_API_KEY for an optional judge pass."
-        : "Optional. Add FEATHERLESS_API_KEY to route the judge agent through Featherless.",
+        ? "Configured through FEATHERLESS_API_KEY as a visible Open Model Critic Agent."
+        : "Optional. Add FEATHERLESS_API_KEY to run an independent open-model critique.",
     },
     {
       name: "Speechmatics",
-      role: "optional voice-input extension for future spoken repo briefs",
+      role: "voice QA transcription for generated narration",
       status: process.env.SPEECHMATICS_API_KEY ? "ready" : "optional",
-      detail: "Not required for repo-only input. Kept as a natural extension for voice-first agent workflows.",
+      detail: process.env.SPEECHMATICS_API_KEY
+        ? "Configured through SPEECHMATICS_API_KEY to transcribe and verify generated narration."
+        : "Optional. Add SPEECHMATICS_API_KEY to verify narration audio against the transcript.",
     },
     {
       name: "Vultr",

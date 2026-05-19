@@ -83,13 +83,15 @@ export type AgentName =
   | "Repo Forensics Agent"
   | "Pitch Strategy Agent"
   | "Creative Director Agent"
+  | "Open Model Critic Agent"
   | "Quality Judge Agent"
   | "Demo Capture Agent"
+  | "Voice QA Agent"
   | "Media Renderer Agent";
 
 export interface AgentLog {
   agent: AgentName;
-  provider: "gemini" | "featherless" | "browser";
+  provider: "gemini" | "featherless" | "speechmatics" | "browser";
   model?: string;
   entries: AgentLogEntry[];
 }
@@ -133,10 +135,21 @@ export interface AudioResult {
   message: string;
 }
 
+export interface VoiceQaResult {
+  status: "ready" | "skipped" | "error";
+  provider: "speechmatics";
+  transcript?: string;
+  similarity?: number;
+  wordCount?: number;
+  jobId?: string;
+  message: string;
+}
+
 export interface PitchResponse {
   repo: RepoContext;
   pitch: PitchPlan;
   audio: AudioResult;
+  voiceQa?: VoiceQaResult;
   capture?: DemoCaptureResult;
   warnings: string[];
   agentLogs: AgentLog[];

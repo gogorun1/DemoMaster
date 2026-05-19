@@ -150,12 +150,15 @@ export async function generatePitchWithAgents(request: PitchRequest, repo: RepoC
       ],
     });
 
+    const openModelCritic = await runFeatherlessCriticAgent(draft, analysis, strategy);
+    logs.push(openModelCritic.log);
+
     const judge = await runQualityJudge(client, model, draft, analysis, strategy).catch((error) =>
       localQualityJudge(error, model, draft),
     );
     logs.push(judge.log);
 
-    const pitch = normalizePitchPlan(draft, request, repo, analysis, judge.review);
+    const pitch = normalizePitchPlan(draft, request, repo, analysis, mergeQualityReviews(judge.review, openModelCritic.review));
     return { pitch, agentLogs: logs };
   } catch (error) {
     const pitch = fallbackPitchPlan(request, repo);
@@ -346,30 +349,6 @@ async function runQualityJudge(
   analysis: ProductAnalysis,
   strategy: PitchStrategy,
 ): Promise<{ review: QualityReview; log: AgentLog }> {
-  const featherless = await runFeatherlessJudge(draft, analysis, strategy);
-  if (featherless.review) {
-    return {
-      review: featherless.review,
-      log: {
-        agent: "Quality Judge Agent",
-        provider: "featherless",
-        model: featherless.model,
-        entries: [
-          {
-            step: "Run second-opinion critic",
-            status: "done",
-            message: featherless.review.verdict,
-          },
-          {
-            step: "Apply quality bar",
-            status: "done",
-            message: `Score ${featherless.review.score}. Fixes: ${featherless.review.fixes.slice(0, 3).join(" ")}`,
-          },
-        ],
-      },
-    };
-  }
-
   const review = await generateJson<QualityReview>(
     client,
     model,
@@ -402,6 +381,53 @@ async function runQualityJudge(
           step: "Apply quality bar",
           status: "done",
           message: `Score ${review.score}. Fixes: ${review.fixes.slice(0, 3).join(" ")}`,
+        },
+      ],
+    },
+  };
+}
+
+async function runFeatherlessCriticAgent(
+  draft: PitchDraft,
+  analysis: ProductAnalysis,
+  strategy: PitchStrategy,
+): Promise<{ review?: QualityReview; log: AgentLog }> {
+  const featherless = await runFeatherlessJudge(draft, analysis, strategy);
+  if (featherless.review) {
+    return {
+      review: featherless.review,
+      log: {
+        agent: "Open Model Critic Agent",
+        provider: "featherless",
+        model: featherless.model,
+        entries: [
+          {
+            step: "Run open-model critique",
+            status: "done",
+            message: featherless.review.verdict,
+          },
+          {
+            step: "Return fix list",
+            status: "done",
+            message: `Score ${featherless.review.score}. Fixes: ${featherless.review.fixes.slice(0, 3).join(" ")}`,
+          },
+        ],
+      },
+    };
+  }
+
+  return {
+    log: {
+      agent: "Open Model Critic Agent",
+      provider: "featherless",
+      model: process.env.FEATHERLESS_MODEL || "Qwen/Qwen3-235B-A22B-Instruct-2507",
+      entries: [
+        {
+          step: "Check Featherless",
+          status: "skipped",
+          message: process.env.FEATHERLESS_API_KEY
+            ? "Featherless critique was unavailable for this run."
+            : "Set FEATHERLESS_API_KEY to enable the independent open-model critic.",
         },
       ],
     },
@@ -487,6 +513,16 @@ async function runFeatherlessJudge(
   } catch {
     return {};
   }
+}
+
+function mergeQualityReviews(primary: QualityReview, secondary?: QualityReview): QualityReview {
+  if (!secondary) return primary;
+  return {
+    score: Math.round((primary.score * 2 + secondary.score) / 3),
+    verdict: `${primary.verdict} Open-model critique: ${secondary.verdict}`,
+    issues: [...new Set([...primary.issues, ...secondary.issues])].slice(0, 6),
+    fixes: [...new Set([...primary.fixes, ...secondary.fixes])].slice(0, 8),
+  };
 }
 
 async function generateJson<T>(

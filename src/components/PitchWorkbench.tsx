@@ -597,6 +597,18 @@ export function PitchWorkbench() {
                     <h2>Transcript</h2>
                   </div>
                   <p className="transcript">{result.pitch.narration}</p>
+                  {result.voiceQa ? (
+                    <div className="voice-qa">
+                      <div>
+                        <span className={`small-status ${captureStatusClass(result.voiceQa.status)}`}>{result.voiceQa.status}</span>
+                        <strong>Speechmatics voice QA</strong>
+                      </div>
+                      <p>{result.voiceQa.message}</p>
+                      {typeof result.voiceQa.similarity === "number" ? (
+                        <small>{Math.round(result.voiceQa.similarity * 100)}% match · {result.voiceQa.wordCount || 0} words</small>
+                      ) : null}
+                    </div>
+                  ) : null}
                 </section>
               </section>
 
