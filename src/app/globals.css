@@ -454,6 +454,33 @@ a {
   font-size: 14px;
 }
 
+.voice-qa {
+  display: grid;
+  gap: 7px;
+  margin-top: 14px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface-2);
+  padding: 11px;
+}
+
+.voice-qa div {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--ink);
+}
+
+.voice-qa p {
+  margin: 0;
+  color: var(--muted);
+}
+
+.voice-qa small {
+  color: var(--muted);
+  font-weight: 750;
+}
+
 .feature-list,
 .scene-list,
 .run-list,

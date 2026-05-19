@@ -15,8 +15,8 @@ No reference-video input or external video-database workflow is used.
 ## Partner Stack
 
 - Google Gemini: primary reasoning, strategy, storyboard, quality judge, and narration audio.
-- Featherless: optional second-opinion critic through an OpenAI-compatible API.
-- Speechmatics: optional future extension for voice-first briefs; not required for repo-only input.
+- Featherless: visible Open Model Critic Agent through an OpenAI-compatible API.
+- Speechmatics: Voice QA Agent that transcribes generated narration and checks it against the transcript.
 - Vultr: VM runner for cloning the repository, launching it, and capturing real demo footage through API or manual Console flow.
 
 ## Getting Started
@@ -53,6 +53,9 @@ Optional partner extensions:
 FEATHERLESS_API_KEY=...
 FEATHERLESS_MODEL=Qwen/Qwen3-235B-A22B-Instruct-2507
 SPEECHMATICS_API_KEY=...
+SPEECHMATICS_LANGUAGE=en
+SPEECHMATICS_OPERATING_POINT=enhanced
+SPEECHMATICS_QA_TIMEOUT_MS=45000
 VULTR_API_KEY=...
 VULTR_ENABLE_PROVISIONING=false
 VULTR_REGION=ams

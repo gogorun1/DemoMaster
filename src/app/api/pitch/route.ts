@@ -2,7 +2,8 @@ import { NextResponse } from "next/server";
 import { fallbackAgentLogs, fallbackPitchPlan } from "@/lib/fallback";
 import { generateNarrationAudio, generatePitchWithAgents } from "@/lib/gemini";
 import { loadRepoContext } from "@/lib/repo-context";
-import type { AgentLog, AudioResult, PitchRequest, RepoContext } from "@/lib/types";
+import { runSpeechmaticsVoiceQa } from "@/lib/speechmatics";
+import type { AgentLog, AudioResult, PitchPlan, PitchRequest, RepoContext, VoiceQaResult } from "@/lib/types";
 
 export const runtime = "nodejs";
 export const maxDuration = 180;
@@ -20,12 +21,23 @@ export async function POST(request: Request) {
     const generation = await generatePitchWithBudget(input, repo);
     const { pitch, agentLogs } = generation;
     const audio = await generateAudioWithBudget(pitch);
+    const voiceQa = await generateVoiceQaWithBudget(audio, pitch);
+    pitch.partnerStack = pitch.partnerStack.map((partner) =>
+      partner.name === "Speechmatics"
+        ? {
+            ...partner,
+            status: voiceQa.voiceQa.status === "ready" ? "ready" : voiceQa.voiceQa.status === "skipped" ? partner.status : "skipped",
+            detail: voiceQa.voiceQa.message,
+          }
+        : partner,
+    );
     const warnings = Array.from(new Set([
       repoResult.warning || "",
       generation.warning || "",
       ...repo.warnings,
       pitch.mode === "fallback" ? "Agentic generation degraded; returned the deterministic fallback pitch." : "",
       audio.status !== "ready" ? audio.message : "",
+      voiceQa.voiceQa.status === "error" ? voiceQa.voiceQa.message : "",
     ].filter(Boolean)));
     const fullLogs: AgentLog[] = [
       ...agentLogs,
@@ -60,9 +72,10 @@ export async function POST(request: Request) {
           },
         ],
       },
+      voiceQa.agentLog,
     ];
 
-    return NextResponse.json({ repo, pitch, audio, warnings, agentLogs: fullLogs });
+    return NextResponse.json({ repo, pitch, audio, voiceQa: voiceQa.voiceQa, warnings, agentLogs: fullLogs });
   } catch (error) {
     return NextResponse.json(
       { error: error instanceof Error ? error.message : "Could not generate pitch video." },
@@ -102,7 +115,7 @@ async function loadRepoWithBudget(input: PitchRequest): Promise<{ repo: RepoCont
 async function generatePitchWithBudget(
   input: PitchRequest,
   repo: RepoContext,
-): Promise<{ pitch: Awaited<ReturnType<typeof fallbackPitchPlan>>; agentLogs: AgentLog[]; warning?: string }> {
+): Promise<{ pitch: PitchPlan; agentLogs: AgentLog[]; warning?: string }> {
   try {
     return await withTimeout(
       generatePitchWithAgents(input, repo),
@@ -119,7 +132,7 @@ async function generatePitchWithBudget(
   }
 }
 
-async function generateAudioWithBudget(pitch: Awaited<ReturnType<typeof fallbackPitchPlan>>): Promise<AudioResult> {
+async function generateAudioWithBudget(pitch: PitchPlan): Promise<AudioResult> {
   try {
     return await withTimeout(
       generateNarrationAudio(pitch),
@@ -131,6 +144,33 @@ async function generateAudioWithBudget(pitch: Awaited<ReturnType<typeof fallback
       status: "skipped",
       provider: "gemini",
       message: friendlyRouteError(error, "Narration audio skipped."),
+    };
+  }
+}
+
+async function generateVoiceQaWithBudget(audio: AudioResult, pitch: PitchPlan): Promise<{
+  voiceQa: VoiceQaResult;
+  agentLog: AgentLog;
+}> {
+  try {
+    return await withTimeout(
+      runSpeechmaticsVoiceQa(audio, pitch),
+      Number(process.env.SPEECHMATICS_QA_TOTAL_TIMEOUT_MS || process.env.SPEECHMATICS_QA_TIMEOUT_MS || DEFAULT_AUDIO_TIMEOUT_MS),
+      "Speechmatics voice QA timed out.",
+    );
+  } catch (error) {
+    const message = friendlyRouteError(error, "Speechmatics voice QA skipped.");
+    return {
+      voiceQa: {
+        status: "error",
+        provider: "speechmatics",
+        message,
+      },
+      agentLog: {
+        agent: "Voice QA Agent",
+        provider: "speechmatics",
+        entries: [{ step: "Run Speechmatics QA", status: "error", message }],
+      },
     };
   }
 }
