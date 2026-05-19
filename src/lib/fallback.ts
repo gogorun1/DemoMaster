@@ -89,6 +89,10 @@ export function fallbackPitchPlan(request: PitchRequest, repo: RepoContext): Pit
           why: "The product cannot create a credible pitch unless it grounds claims in files, routes, components, README content, and API surfaces.",
         },
         {
+          name: "Demo capture",
+          why: "A high-quality pitch video should show the product actually running, so the system needs a sandboxed runner plus browser recording.",
+        },
+        {
           name: "Multi-agent pitch synthesis",
           why: "Separate analyst, strategist, creative, and judge roles make the output easier to trust than a single opaque prompt.",
         },

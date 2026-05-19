@@ -34,9 +34,11 @@ Set these in `.env.local`:
 
 ```bash
 GEMINI_API_KEY=...
-GEMINI_REASONING_MODEL=gemini-3.1-pro-preview
+GEMINI_REASONING_MODEL=gemini-3-flash-preview
+GEMINI_AGENT_TIMEOUT_MS=25000
 GEMINI_TTS_MODEL=gemini-3.1-flash-tts-preview
 GEMINI_TTS_VOICE=Kore
+GEMINI_TTS_TIMEOUT_MS=45000
 GITHUB_TOKEN=...
 ```
 
@@ -50,6 +52,17 @@ VULTR_API_KEY=...
 ```
 
 `GITHUB_TOKEN` is optional for public repositories, but helps avoid rate limits and is required for private repos. If `GEMINI_API_KEY` is absent, the app returns a deterministic fallback so the UI stays usable.
+
+## Demo Capture Direction
+
+The production-quality version should include a Demo Capture Agent:
+
+- Gemini infers the run command and the shortest credible demo path from the repo.
+- A Vultr VM or container sandbox runs the repository without exposing host secrets.
+- Playwright opens the running app and records real browser footage.
+- The renderer mixes that captured product footage with Gemini narration, captions, transcript, and agent logs.
+
+This is infrastructure/orchestration work, not a video-database dependency.
 
 ## Scripts
 
