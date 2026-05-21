@@ -33,7 +33,9 @@ body {
 }
 
 button,
-input {
+input,
+select,
+textarea {
   font: inherit;
 }
 
@@ -184,7 +186,9 @@ a {
   font-weight: 750;
 }
 
-.field input {
+.field input,
+.field select,
+.field textarea {
   width: 100%;
   min-height: 44px;
   border: 1px solid var(--line-strong);
@@ -195,7 +199,15 @@ a {
   outline: none;
 }
 
-.field input:focus {
+.field textarea {
+  min-height: 74px;
+  resize: vertical;
+  line-height: 1.45;
+}
+
+.field input:focus,
+.field select:focus,
+.field textarea:focus {
   border-color: var(--blue);
   box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.12);
 }
@@ -379,6 +391,10 @@ a {
   font-weight: 750;
 }
 
+.project-notice {
+  margin-top: 12px;
+}
+
 .output-grid {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(320px, 0.9fr);
@@ -406,6 +422,18 @@ a {
 
 .panel-heading h2 {
   font-size: 15px;
+}
+
+.project-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.project-toolbar .panel-heading {
+  margin-bottom: 0;
 }
 
 .report-block {
@@ -508,6 +536,41 @@ a {
   display: grid;
   grid-template-columns: 58px 1fr;
   gap: 12px;
+}
+
+.scene-editor-list {
+  display: grid;
+  gap: 14px;
+}
+
+.scene-editor-item {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface-2);
+  padding: 12px;
+}
+
+.scene-editor-item header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.scene-editor-item header strong {
+  color: var(--ink);
+  font-size: 13px;
+}
+
+.scene-editor-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.3fr) minmax(140px, 0.45fr) minmax(120px, 0.35fr);
+  gap: 12px;
+}
+
+.scene-editor-grid .wide {
+  grid-column: 1 / -1;
 }
 
 .run-list li,
@@ -798,7 +861,8 @@ a {
   .workspace,
   .output-grid,
   .agent-grid,
-  .capture-layout {
+  .capture-layout,
+  .scene-editor-grid {
     grid-template-columns: 1fr;
   }
 }
@@ -824,5 +888,9 @@ a {
   .scene-item,
   .agent-panel li {
     grid-template-columns: 1fr;
+  }
+
+  .project-toolbar {
+    align-items: stretch;
   }
 }

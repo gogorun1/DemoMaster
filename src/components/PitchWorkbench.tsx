@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
+import { ChangeEvent, FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import {
   Brain,
   Camera,
@@ -14,14 +14,20 @@ import {
   Pause,
   Play,
   RefreshCcw,
+  Save,
   Sparkles,
   Trophy,
+  Upload,
+  Volume2,
 } from "lucide-react";
 import { VideoCanvas } from "@/components/VideoCanvas";
 import { drawPitchFrame, getDemoPlaybackTime, getSceneAtTime, getTotalDuration, isDemoScene } from "@/lib/render-frame";
-import type { AgentLog, AgentLogEntry, AgentName, DemoCaptureResult, PitchResponse } from "@/lib/types";
+import type { AgentLog, AgentLogEntry, AgentName, DemoCaptureResult, PitchResponse, PitchScene, VisualMode } from "@/lib/types";
 
 const sampleRepo = "https://github.com/vercel/ai-chatbot";
+const projectSchema = "demomaster.project";
+const projectVersion = 1;
+const visualModes: VisualMode[] = ["presenter", "problem", "product", "workflow", "evidence", "close"];
 
 const liveRunSteps: Array<{ agent: AgentName; label: string; detail: string }> = [
   {
@@ -92,9 +98,12 @@ export function PitchWorkbench() {
   const [liveMessage, setLiveMessage] = useState("");
   const [isPlaying, setIsPlaying] = useState(false);
   const [isExporting, setIsExporting] = useState(false);
+  const [isAudioRefreshing, setIsAudioRefreshing] = useState(false);
+  const [isAudioStale, setIsAudioStale] = useState(false);
   const [error, setError] = useState("");
   const [exportUrl, setExportUrl] = useState("");
   const audioRef = useRef<HTMLAudioElement>(null);
+  const projectInputRef = useRef<HTMLInputElement>(null);
 
   const totalDuration = useMemo(() => (result ? getTotalDuration(result.pitch) : 0), [result]);
 
@@ -145,6 +154,7 @@ export function PitchWorkbench() {
     setLiveAgentLogs([]);
     setLiveMessage("Starting agent run.");
     setIsPlaying(false);
+    setIsAudioStale(false);
     setError("");
     setExportUrl("");
     setResult(null);
@@ -184,9 +194,10 @@ export function PitchWorkbench() {
       }
 
       if (!finalResult) throw new Error("Generation ended before a pitch response was returned.");
+      finalResult = normalizePitchResult(finalResult);
       setResult(finalResult);
       finalResult = await runAutomaticCapture(finalResult);
-      setResult(finalResult);
+      setResult(normalizePitchResult(finalResult));
       setCurrentTime(0);
     } catch (generationError) {
       setError(generationError instanceof Error ? generationError.message : "Generation failed.");
@@ -246,7 +257,8 @@ export function PitchWorkbench() {
         agentLogs: mergeAgentLogs(nextResult.agentLogs, alignBody.agentLogs || []),
       };
       setLiveAgentLogs((logs) => mergeAgentLogs(logs, alignBody.agentLogs || []));
-      setResult(nextResult);
+      setIsAudioStale(false);
+      setResult(normalizePitchResult(nextResult));
       return nextResult;
     } catch (captureError) {
       const message = captureError instanceof Error ? captureError.message : "Demo capture failed.";
@@ -278,6 +290,103 @@ export function PitchWorkbench() {
     const next = Number(value);
     setCurrentTime(next);
     if (audioRef.current) audioRef.current.currentTime = next;
+  }
+
+  function updateScene(sceneId: string, patch: Partial<PitchScene>) {
+    setResult((current) => {
+      if (!current) return current;
+      const scenes = current.pitch.scenes.map((scene) => (scene.id === sceneId ? { ...scene, ...patch } : scene));
+      return normalizePitchResult({
+        ...current,
+        pitch: {
+          ...current.pitch,
+          scenes,
+        },
+      });
+    });
+    setIsAudioStale(true);
+    setExportUrl("");
+  }
+
+  async function refreshNarration() {
+    if (!result || isAudioRefreshing) return;
+    setIsAudioRefreshing(true);
+    setError("");
+
+    try {
+      const response = await fetch("/api/pitch/audio", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ pitch: result.pitch }),
+      });
+      const body = (await response.json()) as {
+        pitch?: PitchResponse["pitch"];
+        audio?: PitchResponse["audio"];
+        voiceQa?: PitchResponse["voiceQa"];
+        agentLogs?: AgentLog[];
+        error?: string;
+      };
+      if (!response.ok || !body.pitch || !body.audio) throw new Error(body.error || "Could not regenerate narration.");
+      const nextPitch = body.pitch;
+      const nextAudio = body.audio;
+
+      setResult((current) =>
+        current
+          ? normalizePitchResult({
+              ...current,
+              pitch: nextPitch,
+              audio: nextAudio,
+              voiceQa: body.voiceQa,
+              agentLogs: mergeAgentLogs(current.agentLogs, body.agentLogs || []),
+            })
+          : current,
+      );
+      setLiveAgentLogs((logs) => mergeAgentLogs(logs, body.agentLogs || []));
+      setIsAudioStale(false);
+      setCurrentTime(0);
+    } catch (audioError) {
+      setError(audioError instanceof Error ? audioError.message : "Could not regenerate narration.");
+    } finally {
+      setIsAudioRefreshing(false);
+    }
+  }
+
+  function exportProject() {
+    if (!result) return;
+    const project = {
+      schema: projectSchema,
+      version: projectVersion,
+      exportedAt: new Date().toISOString(),
+      result: normalizePitchResult(result),
+    };
+    const blob = new Blob([JSON.stringify(project, null, 2)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.download = `${slugify(result.pitch.productName || "demomaster")}-project.json`;
+    anchor.click();
+    URL.revokeObjectURL(url);
+  }
+
+  async function importProject(event: ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (!file) return;
+
+    try {
+      const payload = JSON.parse(await file.text()) as unknown;
+      const imported = readProjectResult(payload);
+      const normalized = normalizePitchResult(imported);
+      setResult(normalized);
+      setRepoUrl(normalized.repo.repoUrl);
+      setCurrentTime(0);
+      setIsPlaying(false);
+      setIsAudioStale(false);
+      setExportUrl("");
+      setError("");
+    } catch (importError) {
+      setError(importError instanceof Error ? importError.message : "Could not import project JSON.");
+    }
   }
 
   async function exportVideo() {
@@ -455,6 +564,10 @@ export function PitchWorkbench() {
                       {isExporting ? <Loader2 size={17} className="spin" /> : <Download size={17} />}
                       Export final video
                     </button>
+                    <button className="btn" type="button" onClick={refreshNarration} disabled={isAudioRefreshing || !isAudioStale}>
+                      {isAudioRefreshing ? <Loader2 size={17} className="spin" /> : <Volume2 size={17} />}
+                      {isAudioStale ? "Regenerate voice" : "Voice synced"}
+                    </button>
                   </div>
                   <div className="scrubber">
                     <span className="timecode">{formatTime(currentTime)}</span>
@@ -471,11 +584,30 @@ export function PitchWorkbench() {
                 </div>
 
                 {result.audio.dataUrl ? <audio ref={audioRef} src={result.audio.dataUrl} preload="auto" /> : null}
+                {isAudioStale ? <div className="notice project-notice">Scene script changed. Regenerate voice before final export.</div> : null}
                 {exportUrl ? (
                   <a className="export-link" href={exportUrl} download={`${result.pitch.productName}-pitch.webm`}>
                     Download final pitch video
                   </a>
                 ) : null}
+              </section>
+
+              <section className="panel project-toolbar">
+                <div className="panel-heading">
+                  <FileText size={18} />
+                  <h2>Project script</h2>
+                </div>
+                <div className="button-row">
+                  <button className="btn" type="button" onClick={exportProject}>
+                    <Save size={17} />
+                    Export project JSON
+                  </button>
+                  <button className="btn" type="button" onClick={() => projectInputRef.current?.click()}>
+                    <Upload size={17} />
+                    Import project JSON
+                  </button>
+                  <input ref={projectInputRef} type="file" accept="application/json,.json" onChange={importProject} hidden />
+                </div>
               </section>
 
               <section className="panel">
@@ -618,19 +750,57 @@ export function PitchWorkbench() {
               <section className="panel">
                 <div className="panel-heading">
                   <FileText size={18} />
-                  <h2>Scene plan</h2>
+                  <h2>Scene script editor</h2>
                 </div>
-                <ul className="scene-list">
+                <div className="scene-editor-list">
                   {result.pitch.scenes.map((scene) => (
-                    <li className="scene-item" key={scene.id}>
-                      <span className="scene-time">{formatTime(scene.start)}</span>
-                      <div>
-                        <h3>{scene.title}</h3>
-                        <p>{scene.narration}</p>
+                    <article className="scene-editor-item" key={scene.id}>
+                      <header>
+                        <span className="scene-time">{formatTime(scene.start)}</span>
+                        <strong>{scene.id}</strong>
+                      </header>
+                      <div className="scene-editor-grid">
+                        <label className="field compact-field">
+                          <span>Title</span>
+                          <input value={scene.title} onChange={(event) => updateScene(scene.id, { title: event.target.value })} />
+                        </label>
+                        <label className="field compact-field">
+                          <span>Visual</span>
+                          <select value={scene.visual} onChange={(event) => updateScene(scene.id, { visual: event.target.value as VisualMode })}>
+                            {visualModes.map((mode) => (
+                              <option value={mode} key={mode}>
+                                {mode}
+                              </option>
+                            ))}
+                          </select>
+                        </label>
+                        <label className="field compact-field">
+                          <span>Duration</span>
+                          <input
+                            type="number"
+                            min="1"
+                            max="30"
+                            step="0.5"
+                            value={scene.duration}
+                            onChange={(event) => updateScene(scene.id, { duration: Number(event.target.value) })}
+                          />
+                        </label>
+                        <label className="field compact-field wide">
+                          <span>On-screen text</span>
+                          <input value={scene.onScreenText} onChange={(event) => updateScene(scene.id, { onScreenText: event.target.value })} />
+                        </label>
+                        <label className="field compact-field wide">
+                          <span>Beat</span>
+                          <textarea value={scene.beat} onChange={(event) => updateScene(scene.id, { beat: event.target.value })} rows={2} />
+                        </label>
+                        <label className="field compact-field wide">
+                          <span>Narration</span>
+                          <textarea value={scene.narration} onChange={(event) => updateScene(scene.id, { narration: event.target.value })} rows={3} />
+                        </label>
                       </div>
-                    </li>
+                    </article>
                   ))}
-                </ul>
+                </div>
               </section>
             </>
           ) : (
@@ -646,6 +816,57 @@ export function PitchWorkbench() {
       </div>
     </main>
   );
+}
+
+function normalizePitchResult(result: PitchResponse): PitchResponse {
+  let start = 0;
+  const scenes = result.pitch.scenes.map((scene, index) => {
+    const duration = Number.isFinite(Number(scene.duration)) ? Math.max(1, Number(scene.duration)) : 1;
+    const normalized = {
+      ...scene,
+      id: scene.id || `scene-${index + 1}`,
+      title: scene.title || `Scene ${index + 1}`,
+      beat: scene.beat || "",
+      narration: scene.narration || "",
+      onScreenText: scene.onScreenText || scene.title || `Scene ${index + 1}`,
+      visual: visualModes.includes(scene.visual) ? scene.visual : "workflow",
+      duration,
+      start,
+    };
+    start += duration;
+    return normalized;
+  });
+
+  return {
+    ...result,
+    pitch: {
+      ...result.pitch,
+      scenes,
+      narration: scenes.map((scene) => scene.narration.trim()).filter(Boolean).join(" "),
+    },
+  };
+}
+
+function readProjectResult(payload: unknown): PitchResponse {
+  if (!payload || typeof payload !== "object") throw new Error("Project JSON must be an object.");
+  const maybeProject = payload as { schema?: unknown; result?: unknown; pitch?: unknown };
+  const result = maybeProject.schema === projectSchema ? maybeProject.result : maybeProject;
+  if (!result || typeof result !== "object") throw new Error("Project JSON does not contain a result object.");
+
+  const candidate = result as Partial<PitchResponse>;
+  if (!candidate.repo || !candidate.pitch || !candidate.audio || !Array.isArray(candidate.agentLogs)) {
+    throw new Error("Project JSON is missing repo, pitch, audio, or agent logs.");
+  }
+  if (!Array.isArray(candidate.pitch.scenes)) throw new Error("Project JSON is missing pitch scenes.");
+  return candidate as PitchResponse;
+}
+
+function slugify(value: string) {
+  return value
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 48) || "demomaster";
 }
 
 function FeatureList({ title, items }: { title: string; items: Array<{ name: string; why: string }> }) {
