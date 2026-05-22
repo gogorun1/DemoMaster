@@ -52,11 +52,6 @@ const hydrationFallbackScript = String.raw`
     const section = document.createElement("section");
     section.className = "stage";
     section.innerHTML = [
-      "<div class='stage-meta'><div>",
-      "<span class='eyebrow'>Fallback browser runner</span>",
-      "<h2>" + escapeHtml(pitch?.corePromise || "Pitch ready") + "</h2>",
-      "<p>" + escapeHtml(pitch?.positioning || "") + "</p>",
-      "</div><div class='score'>" + escapeHtml(String(pitch?.score || "")) + "</div></div>",
       capture?.videoUrl ? "<video src='" + capture.videoUrl + "' controls muted playsinline style='width:100%;aspect-ratio:16/9;background:#111827;border-radius:8px'></video>" : "",
       "<div class='button-row'>",
       capture?.videoUrl ? "<a class='btn' target='_blank' rel='noreferrer' href='" + capture.videoUrl + "'>Raw capture video</a>" : "",

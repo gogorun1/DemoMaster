@@ -744,17 +744,6 @@ export function PitchWorkbench() {
               <section className="editor-grid">
                 <div className="preview-column">
                   <section className="stage">
-                <div className="stage-meta">
-                  <div>
-                    <span className="eyebrow">
-                      {result.pitch.productName} · {result.pitch.mode === "agentic" ? "Agentic run" : "Fallback run"}
-                    </span>
-                    <h2>{result.pitch.corePromise}</h2>
-                    <p>{result.pitch.positioning}</p>
-                  </div>
-                  <div className="score">{result.pitch.score}</div>
-                </div>
-
                 <div className="canvas-wrap">
                   <VideoCanvas plan={result.pitch} currentTime={currentTime} capture={result.capture} mediaAsset={activeMediaAsset} />
                 </div>
