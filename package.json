@@ -13,9 +13,12 @@
   },
   "dependencies": {
     "@google/genai": "latest",
+    "@sparticuz/chromium": "^148.0.0",
+    "@vercel/sandbox": "^1.10.2",
     "lucide-react": "latest",
     "next": "latest",
     "playwright": "latest",
+    "playwright-core": "^1.60.0",
     "react": "latest",
     "react-dom": "latest"
   },

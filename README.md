@@ -76,7 +76,8 @@ The local runner uses a minimal child-process environment, disables package life
 DemoMaster uses two capture paths, in this order:
 
 - Public URL capture: reads GitHub homepage metadata and hosted demo links from sampled repo files, then records the page with Playwright.
-- Local runner capture: clones the repo into `/tmp/demomaster-runs`, detects npm/pnpm/yarn, installs dependencies, starts `dev`, `start`, or `preview`, then records `http://127.0.0.1:<port>`.
+- Sandbox runner capture: when `DEMOMASTER_CAPTURE_BACKEND=sandbox`, clones the repo into an isolated Vercel Sandbox microVM, installs dependencies, starts `dev`, `start`, or `preview`, exposes the app port, and captures that sandbox URL.
+- Local runner capture: disabled by default. If explicitly enabled with `DEMOMASTER_ENABLE_LOCAL_RUNNER=1` and `DEMOMASTER_LOCAL_RUNNER_ALLOWED_REPOS`, clones the repo into `/tmp/demomaster-runs`, detects npm/pnpm/yarn, installs dependencies, starts `dev`, `start`, or `preview`, then records `http://127.0.0.1:<port>`.
 
 Capture artifacts are stored under `/tmp/demomaster-captures` and served through `/api/captures/...`. Temporary local runner folders are removed after capture.
 

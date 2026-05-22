@@ -1307,6 +1307,17 @@ function cleanStringArray(value: unknown) {
 }
 
 async function screenshotPart(url: string, requestUrl: string) {
+  if (url.startsWith("data:")) {
+    const match = url.match(/^data:([^;,]+);base64,(.+)$/);
+    if (!match) throw new Error("Capture screenshot data URL is not a supported base64 image.");
+    return {
+      inlineData: {
+        mimeType: match[1],
+        data: match[2],
+      },
+    };
+  }
+
   const absoluteUrl = new URL(url, requestUrl).toString();
   const response = await fetch(absoluteUrl, { cache: "no-store" });
   if (!response.ok) throw new Error(`Could not read capture screenshot: ${response.status}`);

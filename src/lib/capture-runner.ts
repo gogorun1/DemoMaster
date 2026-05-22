@@ -3,8 +3,10 @@ import { existsSync } from "node:fs";
 import { spawn, type ChildProcess } from "node:child_process";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { Sandbox } from "@vercel/sandbox";
 import { loadRepoContext, parseGitHubUrl } from "@/lib/repo-context";
 import type { AgentLog, DemoCapturePlan, DemoCaptureResult, RepoContext } from "@/lib/types";
+import type { Page } from "playwright-core";
 
 const CAPTURE_ROOT = path.join(tmpdir(), "demomaster-captures");
 const LOCAL_RUN_ROOT = path.join(tmpdir(), "demomaster-runs");
@@ -13,6 +15,10 @@ const PUBLIC_CAPTURE_TIMEOUT_MS = 45000;
 const LOCAL_INSTALL_TIMEOUT_MS = 180000;
 const LOCAL_BOOT_TIMEOUT_MS = 70000;
 const LOCAL_RUNNER_ENABLE_FLAG = "1";
+const MAX_PUBLIC_CAPTURE_CANDIDATES = 4;
+const SANDBOX_CAPTURE_BACKEND = "sandbox";
+const DEFAULT_SANDBOX_TIMEOUT_MS = 300000;
+const DEFAULT_SANDBOX_VCPUS = 2;
 
 type CaptureProvider = DemoCaptureResult["provider"];
 
@@ -33,12 +39,20 @@ export async function runBrowserCapture(repoUrl: string, plan: DemoCapturePlan):
     entries.push({
       step: "Find public demo URL",
       status: "done",
-      message: `Trying ${publicCandidates[0]} before local install.`,
+      message: `Found ${publicCandidates.length} public URL candidate${publicCandidates.length === 1 ? "" : "s"}; trying up to ${MAX_PUBLIC_CAPTURE_CANDIDATES} before local install.`,
     });
-    const publicAttempt = await capturePublicUrl(publicCandidates[0], repoUrl);
-    entries.push(...publicAttempt.entries);
-    if (publicAttempt.capture?.status === "ready") {
-      return result(publicAttempt.capture, entries);
+
+    for (const candidate of publicCandidates.slice(0, MAX_PUBLIC_CAPTURE_CANDIDATES)) {
+      entries.push({
+        step: "Try public URL",
+        status: "running",
+        message: candidate,
+      });
+      const publicAttempt = await capturePublicUrl(candidate, repoUrl);
+      entries.push(...publicAttempt.entries);
+      if (publicAttempt.capture?.status === "ready") {
+        return result(publicAttempt.capture, entries);
+      }
     }
   } else {
     entries.push({
@@ -48,19 +62,124 @@ export async function runBrowserCapture(repoUrl: string, plan: DemoCapturePlan):
     });
   }
 
+  const sandboxAttempt = await captureSandboxRepo(repoUrl, plan, entries);
+  entries.push(...sandboxAttempt.entries);
+  if (sandboxAttempt.capture) return result(sandboxAttempt.capture, entries);
+
   const localAttempt = await captureLocalRepo(repoUrl, plan, entries);
   entries.push(...localAttempt.entries);
   if (localAttempt.capture) return result(localAttempt.capture, entries);
 
   return result(
     {
-      status: "error",
+      status: entries.some((entry) => entry.status === "error") ? "error" : "skipped",
       provider: "local-runner",
-      message: "Public URL capture and local runner capture both failed.",
+      message: captureFailureMessage(entries),
       logs: entries,
     },
     entries,
   );
+}
+
+async function captureSandboxRepo(repoUrl: string, plan: DemoCapturePlan, previousEntries: AgentLog["entries"]): Promise<CaptureAttempt> {
+  if (process.env.DEMOMASTER_CAPTURE_BACKEND !== SANDBOX_CAPTURE_BACKEND) {
+    return {
+      entries: [
+        {
+          step: "Run sandbox repo",
+          status: "skipped",
+          message: "Sandbox runner is disabled. Set DEMOMASTER_CAPTURE_BACKEND=sandbox to run repositories in isolated Vercel Sandbox microVMs.",
+        },
+      ],
+    };
+  }
+
+  const parsed = parseGitHubUrl(repoUrl);
+  if (!parsed) {
+    return {
+      entries: [
+        {
+          step: "Run sandbox repo",
+          status: "skipped",
+          message: "Sandbox runner currently accepts GitHub repository URLs only.",
+        },
+      ],
+    };
+  }
+
+  const port = sandboxPort(plan.port);
+  let sandbox: Awaited<ReturnType<typeof Sandbox.create>> | undefined;
+  try {
+    sandbox = await Sandbox.create({
+      runtime: process.env.DEMOMASTER_SANDBOX_RUNTIME || "node24",
+      source: {
+        type: "git",
+        url: githubCloneUrl(parsed.owner, parsed.repo),
+        depth: 1,
+        ...(parsed.branch ? { revision: parsed.branch } : {}),
+      },
+      ports: [port],
+      resources: { vcpus: Number(process.env.DEMOMASTER_SANDBOX_VCPUS || DEFAULT_SANDBOX_VCPUS) },
+      timeout: Number(process.env.DEMOMASTER_SANDBOX_TIMEOUT_MS || DEFAULT_SANDBOX_TIMEOUT_MS),
+      env: sandboxBaseEnv(port),
+    });
+    previousEntries.push({
+      step: "Create sandbox",
+      status: "done",
+      message: `Started isolated sandbox ${sandbox.sandboxId} for ${parsed.owner}/${parsed.repo}.`,
+    });
+
+    const appDir = "/vercel/sandbox";
+    const packageJson = await readSandboxPackageJson(sandbox, appDir);
+    const manager = await detectSandboxPackageManager(sandbox, appDir);
+    await enableSandboxCorepack(sandbox, manager, appDir);
+    await runSandboxInstall(sandbox, manager, appDir);
+    previousEntries.push({
+      step: "Install dependencies in sandbox",
+      status: "done",
+      message: `${installLabel(manager)} completed inside the isolated sandbox.`,
+    });
+
+    const script = chooseRunScript(packageJson.scripts || {});
+    if (!script) throw new Error("No dev, start, or preview script found in package.json.");
+
+    await startSandboxApp(sandbox, manager, script, appDir, port);
+    const targetUrl = await waitForHttp(sandbox.domain(port), LOCAL_BOOT_TIMEOUT_MS);
+    previousEntries.push({
+      step: "Run repository in sandbox",
+      status: "done",
+      message: `${runLabel(manager, script)} responded on ${targetUrl}.`,
+    });
+
+    const capture = await captureUrl(targetUrl, "local-runner", "Captured the repository running inside an isolated Vercel Sandbox.", repoUrl);
+    return {
+      capture,
+      entries: [
+        {
+          step: "Record sandbox app",
+          status: "done",
+          message: "Captured a real browser session from the sandbox-hosted app.",
+        },
+        {
+          step: "Clean up sandbox",
+          status: "done",
+          message: "Stopped the isolated sandbox after capture.",
+        },
+      ],
+    };
+  } catch (error) {
+    return {
+      entries: [
+        {
+          step: "Run sandbox repo",
+          status: "error",
+          message: errorMessage(error, "Sandbox runner capture failed."),
+        },
+      ],
+    };
+  } finally {
+    await sandbox?.stop({ blocking: false }).catch(() => undefined);
+  }
 }
 
 function result(capture: DemoCaptureResult, entries: AgentLog["entries"]) {
@@ -73,6 +192,16 @@ function result(capture: DemoCaptureResult, entries: AgentLog["entries"]) {
       entries,
     },
   };
+}
+
+function captureFailureMessage(entries: AgentLog["entries"]) {
+  const details = entries
+    .filter((entry) => entry.status === "error" || entry.status === "skipped")
+    .map((entry) => `${entry.step}: ${entry.message}`)
+    .slice(-4);
+
+  if (!details.length) return "Demo capture was not available.";
+  return `Demo capture was not available. ${details.join(" ")}`;
 }
 
 async function capturePublicUrl(url: string, repoUrl: string): Promise<CaptureAttempt> {
@@ -201,28 +330,30 @@ async function captureLocalRepo(repoUrl: string, plan: DemoCapturePlan, previous
 }
 
 async function captureUrl(url: string, provider: CaptureProvider, message: string, repoUrl: string): Promise<DemoCaptureResult> {
-  const { chromium } = await import("playwright");
+  const { chromium, launchOptions } = await loadChromium();
   const runId = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
   const dir = path.join(CAPTURE_ROOT, runId);
   const videoDir = path.join(dir, "videos");
   await mkdir(videoDir, { recursive: true });
+  const recordVideo = !process.env.VERCEL;
 
-  const browser = await chromium.launch({ headless: true });
+  const browser = await chromium.launch(launchOptions);
   const context = await browser.newContext({
     viewport: VIEWPORT,
-    recordVideo: { dir: videoDir, size: VIEWPORT },
+    ...(recordVideo ? { recordVideo: { dir: videoDir, size: VIEWPORT } } : {}),
   });
   const page = await context.newPage();
   let videoPath = "";
   let video: ReturnType<typeof page.video> | null = null;
   let interactionSummary: string[] = [];
+  const screenshotPath = path.join(dir, "capture.png");
 
   try {
     await withTimeout(page.goto(url, { waitUntil: "domcontentloaded", timeout: 30000 }), PUBLIC_CAPTURE_TIMEOUT_MS, "Page did not load in time.");
-    video = page.video();
+    video = recordVideo ? page.video() : null;
     await page.waitForTimeout(1800);
     interactionSummary = await performDemoInteractionFlow(page, repoUrl);
-    await page.screenshot({ path: path.join(dir, "capture.png"), fullPage: false });
+    await page.screenshot({ path: screenshotPath, fullPage: false });
     await page.waitForTimeout(900);
   } finally {
     await page.close().catch(() => undefined);
@@ -233,21 +364,48 @@ async function captureUrl(url: string, provider: CaptureProvider, message: strin
 
   if (videoPath) await copyFile(videoPath, path.join(dir, "capture.webm")).catch(() => undefined);
   await writeFile(path.join(dir, "meta.json"), JSON.stringify({ url, provider, capturedAt: new Date().toISOString(), interactionSummary }, null, 2));
+  const screenshotUrl = process.env.VERCEL
+    ? `data:image/png;base64,${(await readFile(screenshotPath)).toString("base64")}`
+    : `/api/captures/${runId}/capture.png`;
 
   return {
     status: "ready",
     provider,
     runId,
     targetUrl: url,
-    screenshotUrl: `/api/captures/${runId}/capture.png`,
+    screenshotUrl,
     videoUrl: existsSync(path.join(dir, "capture.webm")) ? `/api/captures/${runId}/capture.webm` : undefined,
     interactionSummary,
-    message,
+    message: recordVideo ? message : `${message} Serverless capture uses the screenshot frame because video recording requires ffmpeg.`,
     logs: [],
   };
 }
 
-async function performDemoInteractionFlow(page: import("playwright").Page, repoUrl: string) {
+async function loadChromium() {
+  if (process.env.VERCEL) {
+    const [{ chromium }, serverlessChromium] = await Promise.all([
+      import("playwright-core"),
+      import("@sparticuz/chromium"),
+    ]);
+    const chromiumBinary = serverlessChromium.default;
+    return {
+      chromium,
+      launchOptions: {
+        args: chromiumBinary.args,
+        executablePath: await chromiumBinary.executablePath(),
+        headless: true,
+      },
+    };
+  }
+
+  const { chromium } = await import("playwright");
+  return {
+    chromium,
+    launchOptions: { headless: true },
+  };
+}
+
+async function performDemoInteractionFlow(page: Page, repoUrl: string) {
   const summary = ["Opened the live product page in a browser."];
   await page.mouse.move(170, 120);
   await page.waitForTimeout(450);
@@ -299,7 +457,7 @@ async function performDemoInteractionFlow(page: import("playwright").Page, repoU
   return summary;
 }
 
-async function findRepoLikeInput(page: import("playwright").Page) {
+async function findRepoLikeInput(page: Page) {
   const selectors = [
     'input[placeholder*="github" i]',
     'input[placeholder*="repo" i]',
@@ -327,7 +485,7 @@ async function findRepoLikeInput(page: import("playwright").Page) {
   return null;
 }
 
-async function findGenerateButton(page: import("playwright").Page) {
+async function findGenerateButton(page: Page) {
   const candidates = [
     page.getByRole("button", { name: /generate/i }).first(),
     page.getByRole("button", { name: /start/i }).first(),
@@ -343,12 +501,12 @@ async function findGenerateButton(page: import("playwright").Page) {
   return null;
 }
 
-async function isButtonSafeForFastValidation(button: import("playwright").Locator) {
+async function isButtonSafeForFastValidation(button: import("playwright-core").Locator) {
   const type = await button.getAttribute("type").catch(() => "");
   return type === "button";
 }
 
-async function exploreVisiblePage(page: import("playwright").Page) {
+async function exploreVisiblePage(page: Page) {
   await page.mouse.move(320, 260);
   await page.waitForTimeout(700);
 
@@ -367,7 +525,7 @@ async function exploreVisiblePage(page: import("playwright").Page) {
   await page.waitForTimeout(900);
 }
 
-async function runPublicProductFlow(page: import("playwright").Page) {
+async function runPublicProductFlow(page: Page) {
   const summary: string[] = [];
   const primary = await findPrimaryProductAction(page);
   if (primary) {
@@ -408,13 +566,13 @@ async function runPublicProductFlow(page: import("playwright").Page) {
   return summary.length ? summary : ["Explored the visible product page without submitting data."];
 }
 
-async function isSauceDemo(page: import("playwright").Page) {
+async function isSauceDemo(page: Page) {
   if (/saucedemo\.com/i.test(page.url())) return true;
   const username = page.locator('[data-test="username"], #user-name').first();
   return (await username.count().catch(() => 0)) > 0;
 }
 
-async function runSauceDemoFlow(page: import("playwright").Page) {
+async function runSauceDemoFlow(page: Page) {
   const summary: string[] = [];
   const username = page.locator('[data-test="username"], #user-name').first();
   const password = page.locator('[data-test="password"], #password').first();
@@ -484,12 +642,12 @@ async function runSauceDemoFlow(page: import("playwright").Page) {
   return summary.length ? summary : ["Explored the Sauce Demo storefront without submitting real payment or personal data."];
 }
 
-async function isTodoMvc(page: import("playwright").Page) {
+async function isTodoMvc(page: Page) {
   const todoInput = page.locator('input[placeholder="What needs to be done?"], .new-todo').first();
   return (await todoInput.count().catch(() => 0)) > 0;
 }
 
-async function runTodoMvcFlow(page: import("playwright").Page) {
+async function runTodoMvcFlow(page: Page) {
   const summary: string[] = [];
   const input = page.locator('input[placeholder="What needs to be done?"], .new-todo').first();
   if (!(await input.isVisible().catch(() => false))) return ["Opened the TodoMVC app, but the task input was not visible."];
@@ -519,7 +677,7 @@ async function runTodoMvcFlow(page: import("playwright").Page) {
   return summary;
 }
 
-async function findPrimaryProductAction(page: import("playwright").Page) {
+async function findPrimaryProductAction(page: Page) {
   const labels = [
     /create a story/i,
     /start creating/i,
@@ -539,7 +697,7 @@ async function findPrimaryProductAction(page: import("playwright").Page) {
   return null;
 }
 
-async function findSubmitLikeButton(page: import("playwright").Page) {
+async function findSubmitLikeButton(page: Page) {
   const labels = [/sign in/i, /sign up/i, /continue/i, /submit/i, /create/i, /generate/i];
   for (const label of labels) {
     const locator = page.getByRole("button", { name: label }).first();
@@ -635,9 +793,30 @@ function detectPackageManager(appDir: string) {
   return "npm";
 }
 
+async function detectSandboxPackageManager(sandbox: Awaited<ReturnType<typeof Sandbox.create>>, cwd: string) {
+  const result = await sandbox.runCommand({
+    cmd: "sh",
+    args: ["-lc", "if [ -f pnpm-lock.yaml ]; then echo pnpm; elif [ -f yarn.lock ]; then echo yarn; else echo npm; fi"],
+    cwd,
+    signal: AbortSignal.timeout(30000),
+  });
+  ensureSandboxExit(result, "Detect package manager");
+  return (await result.stdout()).trim() || "npm";
+}
+
 async function enableCorepack(manager: string, cwd: string) {
   if (manager === "npm") return;
   await runCommand("corepack", ["enable"], cwd, 30000).catch(() => undefined);
+}
+
+async function enableSandboxCorepack(sandbox: Awaited<ReturnType<typeof Sandbox.create>>, manager: string, cwd: string) {
+  if (manager === "npm") return;
+  await sandbox.runCommand({
+    cmd: "corepack",
+    args: ["enable"],
+    cwd,
+    signal: AbortSignal.timeout(30000),
+  }).catch(() => undefined);
 }
 
 async function runInstall(manager: string, cwd: string) {
@@ -646,6 +825,22 @@ async function runInstall(manager: string, cwd: string) {
   }
   if (manager === "yarn") return runCommand("corepack", ["yarn", "install", "--ignore-scripts"], cwd, LOCAL_INSTALL_TIMEOUT_MS);
   return runCommand("npm", ["install", "--ignore-scripts"], cwd, LOCAL_INSTALL_TIMEOUT_MS);
+}
+
+async function runSandboxInstall(sandbox: Awaited<ReturnType<typeof Sandbox.create>>, manager: string, cwd: string) {
+  const command =
+    manager === "pnpm"
+      ? { cmd: "corepack", args: ["pnpm", "install", "--no-frozen-lockfile"] }
+      : manager === "yarn"
+        ? { cmd: "corepack", args: ["yarn", "install"] }
+        : { cmd: "npm", args: ["install", "--no-audit", "--no-fund"] };
+  const result = await sandbox.runCommand({
+    ...command,
+    cwd,
+    env: sandboxBaseEnv(sandboxPort(0)),
+    signal: AbortSignal.timeout(LOCAL_INSTALL_TIMEOUT_MS),
+  });
+  await ensureSandboxExit(result, `${installLabel(manager)} in sandbox`);
 }
 
 function startApp(manager: string, script: string, cwd: string, port: number) {
@@ -668,6 +863,25 @@ function startApp(manager: string, script: string, cwd: string, port: number) {
   });
 }
 
+async function startSandboxApp(
+  sandbox: Awaited<ReturnType<typeof Sandbox.create>>,
+  manager: string,
+  script: string,
+  cwd: string,
+  port: number,
+) {
+  const command = manager === "npm" ? "npm" : "corepack";
+  const args = manager === "npm" ? ["run", script] : [manager, "run", script];
+  await sandbox.runCommand({
+    cmd: command,
+    args,
+    cwd,
+    detached: true,
+    env: sandboxBaseEnv(port),
+    signal: AbortSignal.timeout(30000),
+  });
+}
+
 function chooseRunScript(scripts: Record<string, string>) {
   return ["dev", "start", "preview"].find((script) => scripts[script]);
 }
@@ -680,6 +894,38 @@ function installLabel(manager: string) {
 
 function runLabel(manager: string, script: string) {
   return manager === "npm" ? `npm run ${script}` : `${manager} run ${script}`;
+}
+
+async function readSandboxPackageJson(sandbox: Awaited<ReturnType<typeof Sandbox.create>>, cwd: string) {
+  const file = await sandbox.readFileToBuffer({ path: "package.json", cwd }, { signal: AbortSignal.timeout(30000) });
+  if (!file) throw new Error("No package.json found at the repository root.");
+  return JSON.parse(file.toString("utf8")) as { scripts?: Record<string, string> };
+}
+
+async function ensureSandboxExit(result: { exitCode: number | null; stderr(): Promise<string>; stdout(): Promise<string> }, label: string) {
+  if (result.exitCode === 0) return;
+  const output = `${await result.stdout().catch(() => "")}\n${await result.stderr().catch(() => "")}`.trim();
+  throw new Error(`${label} failed. ${redact(output.slice(-900))}`);
+}
+
+function sandboxBaseEnv(port: number) {
+  return {
+    BROWSER: "none",
+    CI: "1",
+    HOST: "0.0.0.0",
+    HOSTNAME: "0.0.0.0",
+    NEXT_TELEMETRY_DISABLED: "1",
+    NODE_ENV: "development",
+    PORT: String(port),
+    VITE_HOST: "0.0.0.0",
+    npm_config_audit: "false",
+    npm_config_fund: "false",
+  };
+}
+
+function sandboxPort(preferred: number) {
+  if (preferred >= 1024 && preferred <= 65535) return preferred;
+  return Number(process.env.DEMOMASTER_SANDBOX_PORT || 3000);
 }
 
 async function runCommand(command: string, args: string[], cwd: string, timeoutMs: number) {
