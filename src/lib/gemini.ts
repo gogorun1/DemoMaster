@@ -1,11 +1,14 @@
 import { GoogleGenAI } from "@google/genai";
+import { ensureCaptureManifest } from "@/lib/capture-manifest";
 import { buildPartnerStack, fallbackAgentLogs, fallbackPitchPlan } from "@/lib/fallback";
 import { normalizeVoiceSettings } from "@/lib/project-settings";
+import { inferCameraPlan, inferVisualIntent, normalizeCameraPlan } from "@/lib/semantic-director";
 import type {
   AgentLog,
   AgentLogEntry,
   AudioResult,
   DemoCapturePlan,
+  DemoCaptureSegment,
   DemoCaptureResult,
   PitchPlan,
   PitchRequest,
@@ -322,15 +325,18 @@ export async function alignPitchWithCapture(
       "- Use visual='problem' for the opening, visual='close' for the ending, and visual='product', 'workflow', or 'evidence' for every middle demo scene.",
       "- Do not invent UI features that are not visible in the capture or grounded by the existing script.",
       "- Every middle scene should explicitly match the captured app surface, layout, interaction, or output state.",
+      "- Every middle scene must map to one capture segment when possible and name exactly one camera focus target such as input composer, model selector, primary action, navigation, settings panel, generated result, editor surface, or dashboard evidence.",
+      "- Prefer smooth focus changes over hard cuts: each demo scene should have a single readable target, not a tour of many controls.",
       "- Scene narration must follow the recorded interaction order when an interaction summary is provided.",
       "- If the recording stops at a login, signup, pricing, or setup step, say that clearly instead of claiming the final generation completed.",
       "- Write the demo section after the capture: describe what is happening on screen, why that operation matters, and what it proves.",
       "- Keep the opening and ending concise; put most words and time into the demo walkthrough.",
       "- Keep the script high-quality; this is still a product pitch, not a literal screen reader.",
-      "- Return strict JSON only with keys corePromise, positioning, cta, insights, scenes.",
+      "- Return strict JSON only with keys corePromise, positioning, cta, insights, scenes. Demo scenes may include sourceSegmentId and cameraPlan.focusLabel.",
       "",
       `Capture target URL: ${capture.targetUrl || "unknown"}`,
       `Capture status message: ${capture.message}`,
+      `Capture segments:\n${(capture.manifest?.segments || []).map((segment) => `- ${segment.id}: ${segment.label} (${Math.round(segment.startMs / 1000)}s-${Math.round(segment.endMs / 1000)}s) — ${segment.narrationHint || segment.actionSummary}`).join("\n") || "No capture segments were provided."}`,
       `Recorded interaction summary:\n${(capture.interactionSummary || []).map((step, index) => `${index + 1}. ${step}`).join("\n") || "No interaction summary was provided."}`,
       `Browser capture agent logs:\n${(capture.logs || []).map((entry) => `- ${entry.status}: ${entry.step} — ${entry.message}`).join("\n") || "No capture logs were provided."}`,
       `Existing pitch:\n${JSON.stringify(plan, null, 2)}`,
@@ -356,7 +362,7 @@ export async function alignPitchWithCapture(
       `Gemini capture alignment timed out on ${model}.`,
     );
     const aligned = parseJson(response.text ?? "{}") as CaptureAlignedPitch;
-    const pitch = normalizeCaptureAlignedPitch(plan, aligned);
+    const pitch = normalizeCaptureAlignedPitch(plan, aligned, capture);
     return {
       pitch,
       agentLog: {
@@ -474,7 +480,9 @@ async function runCreativeDirector(
         "Use this story shape: brief problem opener, demo-heavy middle, concise summary close.",
         "The demo-heavy middle will be rewritten after browser capture, so leave room for operation-specific narration.",
         "Open with the problem within 10 seconds.",
-        "Use short on-screen text and one main claim per scene.",
+        "Use short on-screen text and one main claim per scene; avoid lists masquerading as slides.",
+        "Deck scenes should feel like modern product pitch slides: bold headline, one supporting sentence, and product proof early.",
+        "Demo scenes should be workflow/outcome driven, not feature tours.",
         "Do not rely on picture-in-picture; deck scenes and demo scenes should each work fullscreen.",
         "Keep total duration between 45 and 70 seconds.",
         "Also produce a product/UX report explaining why this product and flow make sense.",
@@ -750,10 +758,10 @@ function localCreativeDraft(
   const scenes: PitchScene[] = [
     {
       id: "scene-1",
-      title: "One Repo, One Pitch",
+      title: directAppMode ? "One App, One Pitch" : "One Repo, One Pitch",
       beat: "Presenter opens with the user problem and the single-input promise.",
-      narration: `${productName} starts with a simple idea: a GitHub repo should be enough to explain what a product does, why it matters, and how it works.`,
-      onScreenText: "Repo in. Pitch video out.",
+      narration: `${productName} starts with a simple idea: one product URL should be enough to explain what the product does, why it matters, and how it works.`,
+      onScreenText: "One input. Real product story.",
       visual: "presenter",
       duration: 8,
       start: 0,
@@ -763,7 +771,7 @@ function localCreativeDraft(
       title: "The Gap",
       beat: "Name the workflow pain this product removes.",
       narration: `Teams already have the truth in their code, but turning that truth into a polished demo still takes reading, scripting, recording, and editing by hand.`,
-      onScreenText: "The demo work is still manual",
+      onScreenText: "Demo work is still too manual.",
       visual: "problem",
       duration: 9,
       start: 8,
@@ -775,7 +783,7 @@ function localCreativeDraft(
       narration: flow.length
         ? `The workflow is agentic: ${flow.slice(0, 3).join(", ").toLowerCase()}, then a final pitch is assembled with narration and footage.`
         : `The workflow is agentic: inspect the repo, define the product story, capture the running app, then assemble the final narrated pitch.`,
-      onScreenText: "Inspect -> position -> capture -> narrate",
+      onScreenText: "Agents turn proof into story.",
       visual: "workflow",
       duration: 11,
       start: 17,
@@ -787,7 +795,7 @@ function localCreativeDraft(
       narration: evidence.length
         ? `The pitch is grounded in repository evidence: ${evidence.slice(0, 2).join(" ")}`
         : `The pitch is grounded in the repository structure, README, app routes, and implementation details rather than a generic prompt.`,
-      onScreenText: "Grounded in repo evidence",
+      onScreenText: "Claims stay grounded.",
       visual: "evidence",
       duration: 11,
       start: 28,
@@ -797,7 +805,7 @@ function localCreativeDraft(
       title: "Real Demo Footage",
       beat: "Explain why browser capture is a core capability.",
       narration: `Instead of asking for a reference video, ${productName} records the product itself: first from a public demo URL, then from a temporary local runner when needed.`,
-      onScreenText: "Real browser capture",
+      onScreenText: "Show the product working.",
       visual: "product",
       duration: 10,
       start: 39,
@@ -806,8 +814,8 @@ function localCreativeDraft(
       id: "scene-6",
       title: "Ready To Judge",
       beat: "Close with the outcome and call to action.",
-      narration: `The result is a concise pitch video with transcript, voice, captured UI, and visible agent logs, so builders can judge the story and the system behind it.`,
-      onScreenText: "Pitch, transcript, footage, logs",
+      narration: `The result is a concise pitch video with a synchronized script, captured UI, and narration that can be edited before export.`,
+      onScreenText: "Ready to share and refine.",
       visual: "close",
       duration: 9,
       start: 49,
@@ -1014,12 +1022,15 @@ function normalizePitchPlan(
   };
 }
 
-function normalizeCaptureAlignedPitch(plan: PitchPlan, aligned: CaptureAlignedPitch): PitchPlan {
+function normalizeCaptureAlignedPitch(plan: PitchPlan, aligned: CaptureAlignedPitch, capture: DemoCaptureResult): PitchPlan {
+  const captureWithManifest = ensureCaptureManifest(capture);
+  const segments = captureWithManifest?.manifest?.segments || [];
   let cursor = 0;
   const lastIndex = plan.scenes.length - 1;
   const scenes = plan.scenes.map((scene, index) => {
     const next = aligned.scenes?.[index];
     const isDemoScene = index > 0 && index < lastIndex;
+    const segment = isDemoScene ? pickSegmentForScene(segments, next, index - 1) : undefined;
     const requestedVisual = next?.visual && VISUALS.includes(next.visual) ? next.visual : scene.visual;
     const visual =
       index === 0
@@ -1034,7 +1045,9 @@ function normalizeCaptureAlignedPitch(plan: PitchPlan, aligned: CaptureAlignedPi
                 ? "workflow"
                 : "evidence";
     const duration = clamp(Number(next?.duration) || scene.duration, isDemoScene ? 11 : 7, isDemoScene ? 20 : 12);
-    const normalized = {
+    const focusLabel = cleanString(next?.cameraPlan?.focusLabel) || segmentFocusText(segment) || cleanString(scene.cameraPlan?.focusLabel);
+    const segmentContext = segment ? `${segment.label} ${segment.actionSummary} ${segment.narrationHint || ""}` : "";
+    const normalized: PitchScene = {
       ...scene,
       title: cleanString(next?.title) || scene.title,
       beat: cleanString(next?.beat) || scene.beat,
@@ -1042,8 +1055,22 @@ function normalizeCaptureAlignedPitch(plan: PitchPlan, aligned: CaptureAlignedPi
       onScreenText: cleanString(next?.onScreenText) || scene.onScreenText,
       visual,
       duration,
+      sourceSegmentId: segment?.id || cleanString(next?.sourceSegmentId) || scene.sourceSegmentId,
+      trimStart: segment ? Number((segment.startMs / 1000).toFixed(2)) : scene.trimStart,
+      trimEnd: segment ? Number((segment.endMs / 1000).toFixed(2)) : scene.trimEnd,
       start: cursor,
     };
+    normalized.visualIntent = isDemoScene ? inferVisualIntent(normalized, segmentContext || focusLabel) : normalized.visualIntent;
+    normalized.cameraPlan = isDemoScene
+      ? normalizeCameraPlan(
+          {
+            ...next?.cameraPlan,
+            mode: next?.cameraPlan?.mode || scene.cameraPlan?.mode || "focus",
+            focusLabel,
+          },
+          normalized,
+        )
+      : normalized.cameraPlan;
     cursor += duration;
     return normalized;
   });
@@ -1063,6 +1090,8 @@ function normalizeCaptureAlignedPitch(plan: PitchPlan, aligned: CaptureAlignedPi
 function localCaptureAlignedPitch(plan: PitchPlan, capture: DemoCaptureResult): PitchPlan {
   if (capture.status !== "ready") return plan;
 
+  const captureWithManifest = ensureCaptureManifest(capture);
+  const segments = captureWithManifest?.manifest?.segments || [];
   const steps = cleanStringArray(capture.interactionSummary || []);
   const lastIndex = plan.scenes.length - 1;
   let cursor = 0;
@@ -1070,6 +1099,7 @@ function localCaptureAlignedPitch(plan: PitchPlan, capture: DemoCaptureResult): 
     const isOpening = index === 0;
     const isClosing = index === lastIndex;
     const demoIndex = Math.max(0, index - 1);
+    const segment = !isOpening && !isClosing ? segments[Math.min(demoIndex, Math.max(0, segments.length - 1))] : undefined;
     const step = steps[demoIndex] || steps[steps.length - 1] || capture.message;
     const visual: VisualMode = isOpening
       ? "problem"
@@ -1086,7 +1116,7 @@ function localCaptureAlignedPitch(plan: PitchPlan, capture: DemoCaptureResult): 
       : isClosing
         ? `That is the value of ${plan.productName}: a pitch that starts with the problem, spends most of its time on real product behavior, and ends with a clear reason to believe.`
         : demoNarration(step, demoIndex, plan.productName);
-    const normalized = {
+    const normalized: PitchScene = {
       ...scene,
       title: isOpening ? "The Problem" : isClosing ? "What It Proves" : demoTitle(step, demoIndex),
       beat: isOpening
@@ -1098,8 +1128,16 @@ function localCaptureAlignedPitch(plan: PitchPlan, capture: DemoCaptureResult): 
       onScreenText: isOpening ? "A demo needs proof, not just claims." : isClosing ? "Problem, proof, outcome." : demoOnScreenText(step, demoIndex),
       visual,
       duration,
+      sourceSegmentId: segment?.id,
+      trimStart: segment ? Number((segment.startMs / 1000).toFixed(2)) : scene.trimStart,
+      trimEnd: segment ? Number((segment.endMs / 1000).toFixed(2)) : scene.trimEnd,
       start: cursor,
     };
+    if (!isOpening && !isClosing) {
+      const segmentContext = segment ? `${segment.label} ${segment.actionSummary} ${segment.narrationHint || ""}` : step;
+      normalized.visualIntent = inferVisualIntent(normalized, segmentContext);
+      normalized.cameraPlan = inferCameraPlan(normalized, segmentContext);
+    }
     cursor += duration;
     return normalized;
   });
@@ -1119,6 +1157,21 @@ function demoNarration(step: string, index: number, productName: string) {
     return `${lead}, the recording shows that ${cleanStep.toLowerCase()}. ${productName} does not pretend the workflow is complete here; it uses this guarded step as proof of the real user path and boundary.`;
   }
   return `${lead}, the recording shows that ${cleanStep.toLowerCase()}. This is the useful part of the pitch: the narration follows the actual operation on screen instead of describing an abstract feature list.`;
+}
+
+function pickSegmentForScene(segments: DemoCaptureSegment[], scene: Partial<PitchScene> | undefined, fallbackIndex: number) {
+  const requested = cleanString(scene?.sourceSegmentId);
+  if (requested) {
+    const match = segments.find((segment) => segment.id === requested);
+    if (match) return match;
+  }
+  if (!segments.length) return undefined;
+  return segments[Math.min(Math.max(0, fallbackIndex), segments.length - 1)];
+}
+
+function segmentFocusText(segment: DemoCaptureSegment | undefined) {
+  if (!segment) return "";
+  return cleanString(segment.narrationHint) || cleanString(segment.actionSummary) || cleanString(segment.label);
 }
 
 function demoTitle(step: string, index: number) {
@@ -1478,6 +1531,14 @@ const captureAlignedPitchSchema = {
           onScreenText: { type: "string" },
           visual: { type: "string", enum: VISUALS },
           duration: { type: "integer", minimum: 7, maximum: 16 },
+          sourceSegmentId: { type: "string" },
+          cameraPlan: {
+            type: "object",
+            properties: {
+              mode: { type: "string", enum: ["wide", "focus", "follow", "manual"] },
+              focusLabel: { type: "string" },
+            },
+          },
         },
         required: ["title", "beat", "narration", "onScreenText", "visual", "duration"],
       },

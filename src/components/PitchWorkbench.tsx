@@ -255,6 +255,7 @@ export function PitchWorkbench() {
       setGenerationStage("preparing");
       setResult(normalizePitchResult(finalResult));
       setCurrentTime(0);
+      setLiveMessage("Ready to edit and export.");
       setGenerationStage("ready");
     } catch (generationError) {
       setGenerationStage("error");
@@ -664,11 +665,12 @@ export function PitchWorkbench() {
     }
   }
 
+  const isRunActive = isGenerating && generationStage !== "ready";
   const heroStatus = isExporting
     ? "Exporting video"
     : isAudioRefreshing
       ? "Regenerating voice"
-      : isGenerating
+      : isRunActive
         ? generationLabel(generationStage)
         : result
           ? "Ready to edit/export"
@@ -683,11 +685,11 @@ export function PitchWorkbench() {
           </div>
           <div>
             <h1>DemoMaster</h1>
-            <p>AI Agent Olympics repo-to-pitch studio</p>
+            <p>AI Agent Olympics URL-to-pitch studio</p>
           </div>
         </div>
         <span className="status-pill">
-          <span className={isGenerating ? "status-dot pulse" : result?.pitch.mode === "fallback" ? "status-dot fallback" : "status-dot"} />
+          <span className={isRunActive ? "status-dot pulse" : result?.pitch.mode === "fallback" ? "status-dot fallback" : "status-dot"} />
           {heroStatus}
         </span>
       </section>
@@ -709,7 +711,7 @@ export function PitchWorkbench() {
             <div className="button-row">
               <button className="btn primary" type="button" onClick={startGeneration} disabled={isGenerating} data-demomaster-generate>
                 {isGenerating ? <Loader2 size={17} className="spin" /> : <Sparkles size={17} />}
-                Generate pitch video
+                Generate video
               </button>
               <button className="icon-btn" type="button" onClick={() => setRepoUrl(sampleRepo)} title="Use sample repo">
                 <RefreshCcw size={17} />
@@ -727,7 +729,7 @@ export function PitchWorkbench() {
             </div>
             <GenerationProgress
               stage={generationStage}
-              isGenerating={isGenerating}
+              isGenerating={isRunActive}
               elapsedSeconds={elapsedSeconds}
               message={liveMessage}
               liveLogs={liveAgentLogs}
@@ -1419,7 +1421,7 @@ function GenerationProgress({
   return (
     <div className="generation-progress">
       <div className="live-run-head">
-        <span>{isGenerating ? message || generationLabel(stage) : result ? "Ready to edit and export." : "Waiting for a repository."}</span>
+        <span>{isGenerating ? message || generationLabel(stage) : result ? "Ready to edit and export." : "Waiting for a URL."}</span>
         <strong>{isGenerating ? formatDuration(elapsedSeconds) : `${liveLogs.length || result?.agentLogs.length || 0} logs`}</strong>
       </div>
       <ol className="stage-steps">

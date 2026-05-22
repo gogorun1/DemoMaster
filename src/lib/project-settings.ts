@@ -15,11 +15,11 @@ export function defaultVoiceSettings(): VoiceSettings {
 
 export function defaultDeckStyle(): DeckStyle {
   return {
-    theme: "graphite",
+    theme: "paper",
     density: "balanced",
     captionStyle: "bar",
     primaryColor: "#2563eb",
-    showGrid: true,
+    showGrid: false,
   };
 }
 
