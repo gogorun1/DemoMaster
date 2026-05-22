@@ -13,15 +13,18 @@ import {
   Mic2,
   Pause,
   Play,
+  Redo2,
   RefreshCcw,
   Save,
   Sparkles,
   Trophy,
+  Undo2,
   Upload,
   Volume2,
 } from "lucide-react";
 import { VideoCanvas } from "@/components/VideoCanvas";
 import { ensureCaptureManifest } from "@/lib/capture-manifest";
+import { applyProjectEditOperation, normalizePitchTimeline } from "@/lib/project-edits";
 import { drawPitchFrame, getDemoPlaybackTime, getSceneAtTime, getTotalDuration, isDemoScene } from "@/lib/render-frame";
 import type { AgentLog, AgentLogEntry, AgentName, DemoCaptureManifest, DemoCaptureResult, PitchResponse, PitchScene, VisualMode } from "@/lib/types";
 
@@ -89,6 +92,11 @@ type PitchStreamEvent =
   | { type: "complete"; response: PitchResponse }
   | { type: "error"; message: string };
 
+interface EditorSnapshot {
+  result: PitchResponse;
+  isAudioStale: boolean;
+}
+
 export function PitchWorkbench() {
   const [repoUrl, setRepoUrl] = useState(sampleRepo);
   const [result, setResult] = useState<PitchResponse | null>(null);
@@ -101,6 +109,8 @@ export function PitchWorkbench() {
   const [isExporting, setIsExporting] = useState(false);
   const [isAudioRefreshing, setIsAudioRefreshing] = useState(false);
   const [isAudioStale, setIsAudioStale] = useState(false);
+  const [undoStack, setUndoStack] = useState<EditorSnapshot[]>([]);
+  const [redoStack, setRedoStack] = useState<EditorSnapshot[]>([]);
   const [error, setError] = useState("");
   const [exportUrl, setExportUrl] = useState("");
   const audioRef = useRef<HTMLAudioElement>(null);
@@ -156,6 +166,8 @@ export function PitchWorkbench() {
     setLiveMessage("Starting agent run.");
     setIsPlaying(false);
     setIsAudioStale(false);
+    setUndoStack([]);
+    setRedoStack([]);
     setError("");
     setExportUrl("");
     setResult(null);
@@ -294,18 +306,43 @@ export function PitchWorkbench() {
   }
 
   function updateScene(sceneId: string, patch: Partial<PitchScene>) {
-    setResult((current) => {
-      if (!current) return current;
-      const scenes = current.pitch.scenes.map((scene) => (scene.id === sceneId ? { ...scene, ...patch } : scene));
-      return normalizePitchResult({
-        ...current,
-        pitch: {
-          ...current.pitch,
-          scenes,
-        },
-      });
+    if (!result) return;
+    commitEditableResult({
+      ...result,
+      pitch: applyProjectEditOperation(result.pitch, {
+        type: "update-scene",
+        sceneId,
+        patch,
+      }),
     });
+  }
+
+  function commitEditableResult(nextResult: PitchResponse) {
+    if (!result) return;
+    setUndoStack((stack) => [...stack.slice(-19), { result, isAudioStale }]);
+    setRedoStack([]);
+    setResult(normalizePitchResult(nextResult));
     setIsAudioStale(true);
+    setExportUrl("");
+  }
+
+  function undoEdit() {
+    const previous = undoStack.at(-1);
+    if (!previous || !result) return;
+    setUndoStack((stack) => stack.slice(0, -1));
+    setRedoStack((stack) => [...stack.slice(-19), { result, isAudioStale }]);
+    setResult(previous.result);
+    setIsAudioStale(previous.isAudioStale);
+    setExportUrl("");
+  }
+
+  function redoEdit() {
+    const next = redoStack.at(-1);
+    if (!next || !result) return;
+    setRedoStack((stack) => stack.slice(0, -1));
+    setUndoStack((stack) => [...stack.slice(-19), { result, isAudioStale }]);
+    setResult(next.result);
+    setIsAudioStale(next.isAudioStale);
     setExportUrl("");
   }
 
@@ -383,6 +420,8 @@ export function PitchWorkbench() {
       setCurrentTime(0);
       setIsPlaying(false);
       setIsAudioStale(false);
+      setUndoStack([]);
+      setRedoStack([]);
       setExportUrl("");
       setError("");
     } catch (importError) {
@@ -607,6 +646,14 @@ export function PitchWorkbench() {
                     <Upload size={17} />
                     Import project JSON
                   </button>
+                  <button className="btn" type="button" onClick={undoEdit} disabled={!undoStack.length}>
+                    <Undo2 size={17} />
+                    Undo
+                  </button>
+                  <button className="btn" type="button" onClick={redoEdit} disabled={!redoStack.length}>
+                    <Redo2 size={17} />
+                    Redo
+                  </button>
                   <input ref={projectInputRef} type="file" accept="application/json,.json" onChange={importProject} hidden />
                 </div>
               </section>
@@ -821,32 +868,10 @@ export function PitchWorkbench() {
 }
 
 function normalizePitchResult(result: PitchResponse): PitchResponse {
-  let start = 0;
-  const scenes = result.pitch.scenes.map((scene, index) => {
-    const duration = Number.isFinite(Number(scene.duration)) ? Math.max(1, Number(scene.duration)) : 1;
-    const normalized = {
-      ...scene,
-      id: scene.id || `scene-${index + 1}`,
-      title: scene.title || `Scene ${index + 1}`,
-      beat: scene.beat || "",
-      narration: scene.narration || "",
-      onScreenText: scene.onScreenText || scene.title || `Scene ${index + 1}`,
-      visual: visualModes.includes(scene.visual) ? scene.visual : "workflow",
-      duration,
-      start,
-    };
-    start += duration;
-    return normalized;
-  });
-
   return {
     ...result,
     capture: ensureCaptureManifest(result.capture),
-    pitch: {
-      ...result.pitch,
-      scenes,
-      narration: scenes.map((scene) => scene.narration.trim()).filter(Boolean).join(" "),
-    },
+    pitch: normalizePitchTimeline(result.pitch),
   };
 }
 
