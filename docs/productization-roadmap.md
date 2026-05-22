@@ -27,9 +27,15 @@ Acceptance checks:
 
 Goal: stop treating Playwright recording as a single opaque clip.
 
+Delivered:
+
+- Added a typed capture manifest model with source media, segment timing, narration hints, provider metadata, and capture warnings.
+- Added a backward-compatible manifest builder that derives editable segments from existing capture results.
+- Normalized imported and generated projects so captures always expose manifest data when available.
+- Displayed capture manifest segments in the workbench for review before final editing.
+
 Planned:
 
-- Introduce a structured capture manifest with clip segments, timestamps, screenshots, interaction summaries, warnings, and provider metadata.
 - Upgrade capture steps from natural-language instructions into typed actions with selectors, values, expected states, and shot intent.
 - Preserve current heuristic exploration as fallback behavior.
 - Make final pitch generation consume the capture manifest instead of only a screenshot and free-form summary.

@@ -21,8 +21,9 @@ import {
   Volume2,
 } from "lucide-react";
 import { VideoCanvas } from "@/components/VideoCanvas";
+import { ensureCaptureManifest } from "@/lib/capture-manifest";
 import { drawPitchFrame, getDemoPlaybackTime, getSceneAtTime, getTotalDuration, isDemoScene } from "@/lib/render-frame";
-import type { AgentLog, AgentLogEntry, AgentName, DemoCaptureResult, PitchResponse, PitchScene, VisualMode } from "@/lib/types";
+import type { AgentLog, AgentLogEntry, AgentName, DemoCaptureManifest, DemoCaptureResult, PitchResponse, PitchScene, VisualMode } from "@/lib/types";
 
 const sampleRepo = "https://github.com/vercel/ai-chatbot";
 const projectSchema = "demomaster.project";
@@ -675,6 +676,7 @@ export function PitchWorkbench() {
                         </a>
                       ) : null}
                     </div>
+                    {result.capture?.manifest ? <CaptureManifestPanel manifest={result.capture.manifest} /> : null}
                   </div>
                 </div>
               </section>
@@ -839,12 +841,36 @@ function normalizePitchResult(result: PitchResponse): PitchResponse {
 
   return {
     ...result,
+    capture: ensureCaptureManifest(result.capture),
     pitch: {
       ...result.pitch,
       scenes,
       narration: scenes.map((scene) => scene.narration.trim()).filter(Boolean).join(" "),
     },
   };
+}
+
+function CaptureManifestPanel({ manifest }: { manifest: DemoCaptureManifest }) {
+  return (
+    <div className="capture-manifest">
+      <div className="capture-manifest-head">
+        <strong>Capture manifest</strong>
+        <span>{manifest.segments.length} segment{manifest.segments.length === 1 ? "" : "s"}</span>
+      </div>
+      <ul>
+        {manifest.segments.map((segment) => (
+          <li key={segment.id}>
+            <span className="timecode">{formatTime(segment.startMs / 1000)}</span>
+            <div>
+              <strong>{segment.label}</strong>
+              <p>{segment.narrationHint}</p>
+            </div>
+          </li>
+        ))}
+      </ul>
+      {manifest.warnings.length ? <p className="capture-manifest-warning">{manifest.warnings.slice(0, 2).join(" ")}</p> : null}
+    </div>
+  );
 }
 
 function readProjectResult(payload: unknown): PitchResponse {
