@@ -111,9 +111,9 @@ function drawFullscreenDemo(
   const narration = wrapText(ctx, scene.narration, width - 160, 2);
   const panelHeight = narration.length > 1 ? 82 : 54;
   const isPill = deckStyle.captionStyle === "pill";
-  const panelY = height - panelHeight - (isPill ? 42 : 28);
   const panelX = isPill ? 86 : 56;
   const panelW = width - panelX * 2;
+  const panelY = captionYForCrop(crop, height, panelHeight, isPill);
   ctx.fillStyle = "rgba(15,23,42,0.76)";
   roundRect(ctx, panelX, panelY, panelW, panelHeight, isPill ? 999 : 8);
   ctx.fill();
@@ -616,7 +616,8 @@ function animatedCameraCrop(plan: PitchPlan, scene: PitchScene, cameraPlan: Came
   const target = cameraPlan.crop || { x: 0, y: 0, width: 1, height: 1 };
   if (cameraPlan.mode === "wide") return { x: 0, y: 0, width: 1, height: 1 };
   const previous = previousDemoCrop(plan, scene);
-  const blendProgress = Math.min(1, progress / 0.42);
+  const elapsedSeconds = progress * Math.max(0.1, scene.duration);
+  const blendProgress = Math.min(1, elapsedSeconds / 0.85);
   const blend = cameraPlan.easing === "linear" ? blendProgress : smoothstep(blendProgress);
   return {
     x: lerp(previous.x, target.x, blend),
@@ -624,6 +625,12 @@ function animatedCameraCrop(plan: PitchPlan, scene: PitchScene, cameraPlan: Came
     width: lerp(previous.width, target.width, blend),
     height: lerp(previous.height, target.height, blend),
   };
+}
+
+function captionYForCrop(crop: CameraCrop, height: number, panelHeight: number, isPill: boolean) {
+  const targetBottom = crop.y + crop.height;
+  if (targetBottom > 0.78) return isPill ? 42 : 32;
+  return height - panelHeight - (isPill ? 42 : 28);
 }
 
 function previousDemoCrop(plan: PitchPlan, scene: PitchScene): CameraCrop {

@@ -87,7 +87,6 @@ a {
 
 .brand-lockup h1,
 .brand-lockup p,
-.stage-meta h2,
 .panel-heading h2,
 .report-block h3,
 .feature-list h3,
@@ -317,14 +316,6 @@ a {
   padding: 16px;
 }
 
-.stage-meta {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) 64px;
-  gap: 16px;
-  align-items: start;
-  margin-bottom: 14px;
-}
-
 .eyebrow {
   display: block;
   margin-bottom: 8px;
@@ -333,33 +324,6 @@ a {
   font-size: 12px;
   font-weight: 800;
   text-transform: uppercase;
-}
-
-.stage-meta h2 {
-  max-width: 920px;
-  font-size: clamp(22px, 3vw, 38px);
-  line-height: 1.05;
-}
-
-.stage-meta p {
-  max-width: 820px;
-  margin: 10px 0 0;
-  color: var(--muted);
-  line-height: 1.5;
-}
-
-.score {
-  display: grid;
-  place-items: center;
-  width: 64px;
-  height: 64px;
-  border: 1px solid rgba(5, 150, 105, 0.35);
-  border-radius: 8px;
-  background: #ecfdf5;
-  color: var(--green);
-  font-family: "Geist Mono", "Geist Mono Fallback", ui-monospace, monospace;
-  font-size: 20px;
-  font-weight: 800;
 }
 
 .canvas-wrap {
@@ -1173,8 +1137,7 @@ a {
 
   .topbar,
   .stage-controls,
-  .button-row,
-  .stage-meta {
+  .button-row {
     align-items: stretch;
     grid-template-columns: 1fr;
     flex-direction: column;
