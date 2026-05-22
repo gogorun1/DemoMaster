@@ -1,9 +1,9 @@
 :root {
-  --bg: #f6f7f8;
+  --bg: #f7f8fb;
   --surface: #ffffff;
-  --surface-2: #f0f3f6;
+  --surface-2: #f1f4f8;
   --ink: #111317;
-  --muted: #646b76;
+  --muted: #5f6876;
   --soft: #8b95a3;
   --line: #dfe4ea;
   --line-strong: #c7d0db;
@@ -49,6 +49,10 @@ button:disabled {
 
 a {
   color: inherit;
+}
+
+[hidden] {
+  display: none !important;
 }
 
 .app-shell {
@@ -236,6 +240,14 @@ a {
   color: var(--ink);
   padding: 0 14px;
   font-weight: 700;
+  line-height: 1.15;
+  max-width: 100%;
+  text-align: center;
+}
+
+.btn svg,
+.icon-btn svg {
+  flex: 0 0 auto;
 }
 
 .btn.primary {
@@ -371,6 +383,7 @@ a {
   align-items: center;
   justify-content: space-between;
   gap: 16px;
+  flex-wrap: wrap;
   padding-top: 14px;
 }
 
@@ -379,7 +392,7 @@ a {
   align-items: center;
   gap: 10px;
   flex: 1;
-  min-width: 0;
+  min-width: 240px;
 }
 
 .scrubber input {
@@ -474,6 +487,17 @@ a {
 .inspector-panel .media-controls,
 .camera-grid {
   grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.inspector-panel .media-controls,
+.inspector-panel .scene-editor-grid,
+.inspector-panel .capture-layout,
+.inspector-panel .url-import-row {
+  grid-template-columns: 1fr;
+}
+
+.inspector-panel .scene-editor-grid .wide {
+  grid-column: 1;
 }
 
 .camera-grid {
@@ -721,7 +745,7 @@ a {
   gap: 10px;
   border-bottom: 1px solid var(--line);
   padding-bottom: 12px;
-  color: var(--text);
+  color: var(--ink);
   font-size: 13px;
   font-weight: 750;
 }
@@ -816,7 +840,7 @@ a {
   align-items: center;
   justify-content: space-between;
   gap: 10px;
-  color: var(--text);
+  color: var(--ink);
   font-weight: 760;
 }
 
@@ -907,6 +931,10 @@ a {
   gap: 14px;
   border-top: 1px solid var(--line);
   padding: 14px;
+}
+
+.run-details-grid .panel {
+  box-shadow: none;
 }
 
 .capture-layout {
@@ -1153,7 +1181,22 @@ a {
   }
 
   .scrubber {
+    min-width: 0;
     width: 100%;
+  }
+
+  .btn,
+  .icon-btn {
+    width: 100%;
+  }
+
+  .repo-form .icon-btn {
+    width: 48px;
+  }
+
+  .inspector-tabs {
+    grid-template-columns: repeat(5, minmax(70px, 1fr));
+    overflow-x: auto;
   }
 
   .scene-item,

@@ -15,12 +15,12 @@ type FrameColors = {
 };
 
 const palette: Record<VisualMode, { primary: string; secondary: string; accent: string }> = {
-  presenter: { primary: "#2563eb", secondary: "#101827", accent: "#dbeafe" },
-  problem: { primary: "#dc2626", secondary: "#241313", accent: "#fecaca" },
-  product: { primary: "#059669", secondary: "#0d1c17", accent: "#d1fae5" },
-  workflow: { primary: "#7c3aed", secondary: "#181126", accent: "#ede9fe" },
-  evidence: { primary: "#d97706", secondary: "#21180d", accent: "#fed7aa" },
-  close: { primary: "#0f766e", secondary: "#0c1d1b", accent: "#ccfbf1" },
+  presenter: { primary: "#2563eb", secondary: "#f8fafc", accent: "#dbeafe" },
+  problem: { primary: "#f97316", secondary: "#fff7ed", accent: "#fed7aa" },
+  product: { primary: "#059669", secondary: "#f0fdf4", accent: "#bbf7d0" },
+  workflow: { primary: "#7c3aed", secondary: "#f5f3ff", accent: "#ddd6fe" },
+  evidence: { primary: "#0ea5e9", secondary: "#f0f9ff", accent: "#bae6fd" },
+  close: { primary: "#111827", secondary: "#f8fafc", accent: "#a7f3d0" },
 };
 
 export function getTotalDuration(plan: PitchPlan) {
@@ -79,7 +79,7 @@ export function drawPitchFrame(
 
   ctx.clearRect(0, 0, width, height);
   if (captureImage && isDemoScene(scene)) {
-    drawFullscreenDemo(ctx, scene, sceneProgress, width, height, captureImage, deckStyle, colors);
+    drawFullscreenDemo(ctx, plan, scene, sceneProgress, width, height, captureImage, deckStyle, colors);
     return;
   }
 
@@ -92,6 +92,7 @@ export function drawPitchFrame(
 
 function drawFullscreenDemo(
   ctx: CanvasRenderingContext2D,
+  plan: PitchPlan,
   scene: PitchScene,
   progress: number,
   width: number,
@@ -101,7 +102,7 @@ function drawFullscreenDemo(
   colors: FrameColors,
 ) {
   const cameraPlan = normalizeCameraPlan(scene.cameraPlan, scene);
-  const crop = animatedCameraCrop(cameraPlan, progress);
+  const crop = animatedCameraCrop(plan, scene, cameraPlan, progress);
   drawImageCropCover(ctx, captureImage, crop, 0, 0, width, height);
   drawCameraVignette(ctx, width, height, cameraPlan, colors);
   if (deckStyle.captionStyle === "none") return;
@@ -133,23 +134,29 @@ function drawBackground(
   colors: FrameColors,
   deckStyle: DeckStyle,
 ) {
-  const gradient = ctx.createLinearGradient(0, 0, width, height);
-  gradient.addColorStop(0, colors.bgStart);
-  gradient.addColorStop(0.48, colors.bgMid);
-  gradient.addColorStop(1, colors.secondary);
-  ctx.fillStyle = gradient;
+  ctx.fillStyle = colors.bgStart;
   ctx.fillRect(0, 0, width, height);
 
+  ctx.fillStyle = colors.bgMid;
+  ctx.fillRect(width * 0.58, 0, width * 0.42, height);
+
+  ctx.fillStyle = colors.panel;
+  roundRect(ctx, width * 0.56, 96, width * 0.36, height - 176, 10);
+  ctx.fill();
+  ctx.strokeStyle = colors.panelStroke;
+  ctx.lineWidth = 1;
+  ctx.stroke();
+
   if (deckStyle.showGrid) {
-    ctx.strokeStyle = deckStyle.theme === "paper" ? "rgba(15,23,42,0.08)" : "rgba(255,255,255,0.055)";
+    ctx.strokeStyle = deckStyle.theme === "studio" || deckStyle.theme === "midnight" ? "rgba(255,255,255,0.055)" : "rgba(15,23,42,0.055)";
     ctx.lineWidth = 1;
-    for (let x = 0; x < width; x += 64) {
+    for (let x = 0; x < width; x += 72) {
       ctx.beginPath();
       ctx.moveTo(x, 0);
       ctx.lineTo(x, height);
       ctx.stroke();
     }
-    for (let y = 0; y < height; y += 64) {
+    for (let y = 0; y < height; y += 72) {
       ctx.beginPath();
       ctx.moveTo(0, y);
       ctx.lineTo(width, y);
@@ -158,30 +165,29 @@ function drawBackground(
   }
 
   ctx.fillStyle = colors.primary;
-  ctx.globalAlpha = 0.07;
-  ctx.fillRect(0, 0, width, height);
+  ctx.globalAlpha = 0.1;
+  ctx.fillRect(0, 0, 12, height);
+  ctx.fillRect(44, height - 70, width - 88, 4);
   ctx.globalAlpha = 1;
 }
 
 function drawHeader(ctx: CanvasRenderingContext2D, plan: PitchPlan, time: number, total: number, width: number, colors: FrameColors) {
-  ctx.fillStyle = colors.panel;
-  roundRect(ctx, 42, 34, width - 84, 58, 8);
-  ctx.fill();
-  ctx.strokeStyle = colors.panelStroke;
-  ctx.stroke();
-
   ctx.fillStyle = colors.ink;
-  ctx.font = "700 25px Geist, Arial, sans-serif";
+  ctx.font = "760 23px Geist, Arial, sans-serif";
   ctx.fillText(plan.productName, 68, 70);
 
   ctx.fillStyle = colors.muted;
-  ctx.font = "500 17px Geist, Arial, sans-serif";
-  fitText(ctx, plan.tagline, 68 + measure(ctx, plan.productName) + 24, 70, width - 360);
+  ctx.font = "560 15px Geist, Arial, sans-serif";
+  fitText(ctx, plan.tagline, 68, 96, width * 0.42);
 
-  ctx.font = "600 16px Geist Mono, monospace";
+  ctx.fillStyle = colors.primary;
+  roundRect(ctx, width - 164, 42, 96, 34, 999);
+  ctx.fill();
+  ctx.font = "760 13px Geist Mono, monospace";
   ctx.fillStyle = colors.primary;
   ctx.textAlign = "right";
-  ctx.fillText(`${Math.round(Math.min(time, total))}s / ${Math.round(total)}s`, width - 68, 70);
+  ctx.fillStyle = "#ffffff";
+  ctx.fillText(`${Math.round(Math.min(time, total))}s / ${Math.round(total)}s`, width - 88, 64);
   ctx.textAlign = "left";
 }
 
@@ -191,28 +197,15 @@ function drawVisual(
   progress: number,
   width: number,
   height: number,
-  colors: { primary: string; accent: string; secondary: string },
+  colors: FrameColors,
   captureImage?: CanvasImageSource,
 ) {
-  const left = width - Math.min(520, width * 0.42) - 68;
-  const top = 136;
-  const boxWidth = Math.min(520, width * 0.42);
-  const boxHeight = height - 246;
+  const boxWidth = Math.min(480, width * 0.36);
+  const boxHeight = height - 218;
+  const left = width - boxWidth - 88;
+  const top = 126;
 
-  ctx.fillStyle = "rgba(255,255,255,0.08)";
-  ctx.strokeStyle = "rgba(255,255,255,0.15)";
-  ctx.lineWidth = 2;
-  roundRect(ctx, left, top, boxWidth, boxHeight, 8);
-  ctx.fill();
-  ctx.stroke();
-
-  ctx.fillStyle = colors.primary;
-  ctx.globalAlpha = 0.12;
-  roundRect(ctx, left + 20, top + 20, boxWidth - 40, boxHeight - 40, 8);
-  ctx.fill();
-  ctx.globalAlpha = 1;
-
-  if (captureImage && ["product", "workflow", "evidence"].includes(scene.visual)) {
+  if (captureImage && ["presenter", "close"].includes(scene.visual)) {
     drawCapturedProduct(ctx, left, top, boxWidth, boxHeight, colors, captureImage);
     return;
   }
@@ -231,24 +224,29 @@ function drawCapturedProduct(
   y: number,
   width: number,
   height: number,
-  colors: { primary: string; accent: string },
+  colors: FrameColors,
   captureImage: CanvasImageSource,
 ) {
-  ctx.fillStyle = "#ffffff";
-  roundRect(ctx, x + 30, y + 44, width - 60, height - 88, 8);
+  ctx.fillStyle = colors.panel;
+  roundRect(ctx, x, y, width, height, 10);
   ctx.fill();
+  ctx.strokeStyle = colors.panelStroke;
+  ctx.lineWidth = 1;
+  ctx.stroke();
 
-  drawImageCover(ctx, captureImage, x + 38, y + 72, width - 76, height - 136);
+  ctx.fillStyle = colors.ink;
+  ctx.font = "780 20px Geist, Arial, sans-serif";
+  ctx.fillText("Product proof", x + 26, y + 38);
 
-  ctx.fillStyle = "rgba(17,19,23,0.82)";
-  roundRect(ctx, x + 54, y + height - 116, width - 108, 46, 8);
-  ctx.fill();
-  ctx.fillStyle = colors.accent;
-  ctx.font = "700 18px Geist, Arial, sans-serif";
-  fitText(ctx, "Captured from the running repo", x + 74, y + height - 87, width - 150);
+  ctx.fillStyle = colors.muted;
+  ctx.font = "560 13px Geist Mono, monospace";
+  ctx.fillText("RECORDED DEMO", x + 26, y + 62);
+
+  drawImageCover(ctx, captureImage, x + 26, y + 84, width - 52, height - 128);
+
   ctx.strokeStyle = colors.primary;
-  ctx.lineWidth = 4;
-  roundRect(ctx, x + 38, y + 72, width - 76, height - 136, 8);
+  ctx.lineWidth = 3;
+  roundRect(ctx, x + 26, y + 84, width - 52, height - 128, 8);
   ctx.stroke();
 }
 
@@ -258,19 +256,29 @@ function drawProblem(
   y: number,
   width: number,
   height: number,
-  colors: { primary: string; accent: string },
+  colors: FrameColors,
   progress: number,
 ) {
-  const rows = ["feature tour", "missing hook", "no proof beat", "weak close"];
+  drawEditorialCard(ctx, x, y, width, height, colors);
+  const rows = ["Unclear story", "Feature tour", "No proof moment"];
   rows.forEach((row, index) => {
-    const rowY = y + 78 + index * 72;
-    drawChip(ctx, x + 42, rowY, width - 84, 44, row, index < 2 + Math.round(progress * 2) ? colors.primary : "#4b514b");
+    const rowY = y + 88 + index * 88;
+    const active = progress > index * 0.18;
+    ctx.fillStyle = active ? colors.primary : colors.panelStroke;
+    roundRect(ctx, x + 34, rowY, 7, 48, 4);
+    ctx.fill();
+    ctx.fillStyle = colors.ink;
+    ctx.font = "760 24px Geist, Arial, sans-serif";
+    ctx.fillText(row, x + 58, rowY + 30);
+    ctx.fillStyle = colors.muted;
+    ctx.font = "540 15px Geist, Arial, sans-serif";
+    ctx.fillText(index === 0 ? "The viewer cannot see the win." : index === 1 ? "Screens change without a narrative." : "Claims arrive before evidence.", x + 58, rowY + 56);
   });
   ctx.strokeStyle = colors.primary;
-  ctx.lineWidth = 5;
+  ctx.lineWidth = 4;
   ctx.beginPath();
-  ctx.moveTo(x + 64, y + height - 84);
-  ctx.bezierCurveTo(x + 170, y + height - 126, x + 266, y + height - 32, x + width - 58, y + height - 110);
+  ctx.moveTo(x + 34, y + height - 64);
+  ctx.lineTo(x + width - 34, y + height - 64);
   ctx.stroke();
 }
 
@@ -280,49 +288,29 @@ function drawTalkingHead(
   y: number,
   width: number,
   height: number,
-  colors: { primary: string; accent: string },
+  colors: FrameColors,
   progress: number,
 ) {
-  const cx = x + width / 2;
-  const faceY = y + height * 0.34;
-  const mouth = 8 + Math.sin(progress * Math.PI * 18) * 5;
-
-  ctx.fillStyle = "rgba(255,255,255,0.08)";
-  roundRect(ctx, x + 54, y + 44, width - 108, height - 88, 8);
-  ctx.fill();
-
-  ctx.fillStyle = colors.accent;
-  ctx.beginPath();
-  ctx.arc(cx, faceY, 72, 0, Math.PI * 2);
-  ctx.fill();
-
-  ctx.fillStyle = "#080908";
-  ctx.beginPath();
-  ctx.arc(cx - 26, faceY - 12, 6, 0, Math.PI * 2);
-  ctx.arc(cx + 26, faceY - 12, 6, 0, Math.PI * 2);
-  ctx.fill();
-
-  ctx.strokeStyle = "#080908";
-  ctx.lineWidth = 6;
-  ctx.beginPath();
-  ctx.moveTo(cx - 24, faceY + 28);
-  ctx.quadraticCurveTo(cx, faceY + 28 + mouth, cx + 24, faceY + 28);
-  ctx.stroke();
-
-  ctx.fillStyle = colors.primary;
-  roundRect(ctx, cx - 92, faceY + 84, 184, 132, 8);
-  ctx.fill();
-
-  ctx.strokeStyle = colors.primary;
+  drawEditorialCard(ctx, x, y, width, height, colors);
+  const items = ["Need", "Flow", "Proof"];
+  items.forEach((item, index) => {
+    const itemY = y + 92 + index * 78;
+    ctx.fillStyle = index <= Math.floor(progress * items.length) ? colors.primary : colors.panelStroke;
+    roundRect(ctx, x + 42, itemY, 48, 48, 8);
+    ctx.fill();
+    ctx.fillStyle = index <= Math.floor(progress * items.length) ? "#ffffff" : colors.muted;
+    ctx.font = "800 18px Geist Mono, monospace";
+    ctx.fillText(String(index + 1).padStart(2, "0"), x + 53, itemY + 31);
+    ctx.fillStyle = colors.ink;
+    ctx.font = "780 30px Geist, Arial, sans-serif";
+    ctx.fillText(item, x + 112, itemY + 33);
+  });
+  ctx.strokeStyle = colors.accent;
   ctx.lineWidth = 4;
-  for (let i = 0; i < 9; i += 1) {
-    const wx = x + 82 + i * ((width - 164) / 8);
-    const waveHeight = 18 + Math.sin(progress * Math.PI * 12 + i) * 18;
-    ctx.beginPath();
-    ctx.moveTo(wx, y + height - 66 - waveHeight);
-    ctx.lineTo(wx, y + height - 66 + waveHeight);
-    ctx.stroke();
-  }
+  ctx.beginPath();
+  ctx.moveTo(x + 66, y + 140);
+  ctx.lineTo(x + 66, y + 296);
+  ctx.stroke();
 }
 
 function drawSolution(
@@ -331,16 +319,20 @@ function drawSolution(
   y: number,
   width: number,
   height: number,
-  colors: { primary: string; accent: string },
+  colors: FrameColors,
   progress: number,
 ) {
-  drawNode(ctx, x + 60, y + 92, "Repo", colors.primary);
-  drawNode(ctx, x + width - 190, y + 92, "Pitch", colors.accent);
-  drawNode(ctx, x + 60, y + height - 150, "Video", colors.accent);
-  drawNode(ctx, x + width - 190, y + height - 150, "Voice", colors.primary);
-  drawArrow(ctx, x + 206, y + 117, x + width - 214, y + 117, progress, colors.primary);
-  drawArrow(ctx, x + 140, y + height - 126, x + width - 214, y + 136, progress, colors.accent);
-  drawArrow(ctx, x + width - 118, y + 160, x + width - 118, y + height - 150, progress, colors.primary);
+  drawEditorialCard(ctx, x, y, width, height, colors);
+  const nodes = [
+    { label: "Input", x: x + 36, y: y + 96 },
+    { label: "Agents", x: x + width - 178, y: y + 96 },
+    { label: "Pitch", x: x + width - 178, y: y + height - 142 },
+    { label: "Video", x: x + 36, y: y + height - 142 },
+  ];
+  nodes.forEach((node, index) => drawNode(ctx, node.x, node.y, node.label, index % 2 ? colors.accent : colors.primary, colors));
+  drawArrow(ctx, x + 162, y + 124, x + width - 190, y + 124, progress, colors.primary);
+  drawArrow(ctx, x + width - 116, y + 160, x + width - 116, y + height - 154, progress, colors.accent);
+  drawArrow(ctx, x + width - 190, y + height - 114, x + 162, y + height - 114, progress, colors.primary);
 }
 
 function drawWorkflow(
@@ -349,25 +341,22 @@ function drawWorkflow(
   y: number,
   width: number,
   height: number,
-  colors: { primary: string; accent: string },
+  colors: FrameColors,
   progress: number,
 ) {
+  drawEditorialCard(ctx, x, y, width, height, colors);
   const steps = ["understand", "select", "script", "narrate"];
   steps.forEach((step, index) => {
-    const stepX = x + 46 + index * ((width - 92) / steps.length);
+    const stepX = x + 38;
+    const stepY = y + 76 + index * 76;
     const active = progress * steps.length >= index;
-    drawMiniPanel(ctx, stepX, y + 92 + index * 44, (width - 118) / 2, 64, step, active ? colors.primary : "#5b665d");
+    drawMiniPanel(ctx, stepX, stepY, width - 76, 54, step, active ? colors.primary : colors.panelStroke, colors);
   });
   ctx.strokeStyle = colors.accent;
-  ctx.lineWidth = 4;
+  ctx.lineWidth = 3;
   ctx.beginPath();
-  ctx.moveTo(x + 70, y + height - 82);
-  for (let i = 0; i < 7; i += 1) {
-    const px = x + 70 + i * ((width - 140) / 6);
-    const py = y + height - 82 - Math.sin(i + progress * 3) * 34;
-    if (i === 0) ctx.moveTo(px, py);
-    else ctx.lineTo(px, py);
-  }
+  ctx.moveTo(x + 64, y + 104);
+  ctx.lineTo(x + 64, y + 104 + 228 * Math.min(1, progress + 0.12));
   ctx.stroke();
 }
 
@@ -377,22 +366,27 @@ function drawProof(
   y: number,
   width: number,
   height: number,
-  colors: { primary: string; accent: string },
+  colors: FrameColors,
   progress: number,
 ) {
-  const bars = [0.42, 0.68, 0.82, 0.58, 0.91];
-  bars.forEach((bar, index) => {
-    const barHeight = (height - 170) * bar * Math.min(1, progress + 0.2);
-    const bx = x + 64 + index * ((width - 128) / bars.length);
-    ctx.fillStyle = index === 4 ? colors.primary : "rgba(255,255,255,0.16)";
-    roundRect(ctx, bx, y + height - 72 - barHeight, 44, barHeight, 5);
+  drawEditorialCard(ctx, x, y, width, height, colors);
+  const metrics = [
+    ["01", "Real footage"],
+    ["02", "Aligned script"],
+    ["03", "Voice QA"],
+  ];
+  metrics.forEach(([number, label], index) => {
+    const metricY = y + 92 + index * 86;
+    ctx.fillStyle = index <= Math.floor(progress * metrics.length) ? colors.accent : colors.panelStroke;
+    roundRect(ctx, x + 34, metricY, width - 68, 58, 8);
     ctx.fill();
+    ctx.fillStyle = colors.primary;
+    ctx.font = "800 20px Geist Mono, monospace";
+    ctx.fillText(number, x + 56, metricY + 37);
+    ctx.fillStyle = colors.ink;
+    ctx.font = "760 24px Geist, Arial, sans-serif";
+    ctx.fillText(label, x + 104, metricY + 38);
   });
-  ctx.fillStyle = colors.accent;
-  ctx.font = "700 82px Geist, Arial, sans-serif";
-  ctx.fillText("92", x + width - 178, y + 140);
-  ctx.font = "600 20px Geist, Arial, sans-serif";
-  ctx.fillText("pitch score", x + width - 176, y + 174);
 }
 
 function drawCta(
@@ -401,25 +395,26 @@ function drawCta(
   y: number,
   width: number,
   height: number,
-  colors: { primary: string; accent: string },
+  colors: FrameColors,
   progress: number,
 ) {
+  drawEditorialCard(ctx, x, y, width, height, colors);
   ctx.fillStyle = colors.primary;
-  roundRect(ctx, x + 58, y + 94, width - 116, 86, 8);
+  roundRect(ctx, x + 38, y + 78, width - 76, 92, 10);
   ctx.fill();
-  ctx.fillStyle = "#080908";
-  ctx.font = "800 34px Geist, Arial, sans-serif";
-  ctx.fillText("Export", x + 88, y + 148);
+  ctx.fillStyle = "#ffffff";
+  ctx.font = "850 36px Geist, Arial, sans-serif";
+  ctx.fillText("Ready", x + 66, y + 136);
 
   ctx.strokeStyle = colors.accent;
-  ctx.lineWidth = 7;
+  ctx.lineWidth = 10;
   ctx.beginPath();
-  ctx.arc(x + width / 2, y + height - 142, 74, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * progress);
+  ctx.arc(x + width / 2, y + height - 126, 70, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * progress);
   ctx.stroke();
-  ctx.fillStyle = "#f1f3ed";
-  ctx.font = "700 24px Geist, Arial, sans-serif";
+  ctx.fillStyle = colors.ink;
+  ctx.font = "760 22px Geist, Arial, sans-serif";
   ctx.textAlign = "center";
-  ctx.fillText("ready", x + width / 2, y + height - 134);
+  ctx.fillText("export", x + width / 2, y + height - 118);
   ctx.textAlign = "left";
 }
 
@@ -434,27 +429,28 @@ function drawCopy(
   deckStyle: DeckStyle,
 ) {
   const x = 68;
-  const maxWidth = Math.min(570, width * 0.45);
-  const y = 154;
-  const headlineSize = deckStyle.density === "bold" ? 70 : deckStyle.density === "compact" ? 50 : 60;
+  const maxWidth = Math.min(610, width * 0.47);
+  const y = 162;
+  const headlineSize = deckStyle.density === "bold" ? 66 : deckStyle.density === "compact" ? 48 : 58;
   const beatSize = deckStyle.density === "compact" ? 20 : 24;
 
   ctx.fillStyle = colors.primary;
-  ctx.font = "700 18px Geist Mono, monospace";
+  ctx.font = "780 16px Geist Mono, monospace";
   ctx.fillText(scene.title.toUpperCase(), x, y);
 
   ctx.fillStyle = colors.ink;
-  ctx.font = `850 ${headlineSize}px Geist, Arial, sans-serif`;
+  const fittedHeadline = fitWrappedFont(ctx, scene.onScreenText, maxWidth, 3, headlineSize, 34, 850);
   const titleLines = wrapText(ctx, scene.onScreenText, maxWidth, 3);
-  titleLines.forEach((line, index) => ctx.fillText(line, x, y + 74 + index * (headlineSize + 4)));
+  titleLines.forEach((line, index) => ctx.fillText(line, x, y + 74 + index * (fittedHeadline + 4)));
 
   ctx.fillStyle = colors.muted;
   ctx.font = `500 ${beatSize}px Geist, Arial, sans-serif`;
   const beatLines = wrapText(ctx, scene.beat, maxWidth, 4);
-  beatLines.forEach((line, index) => ctx.fillText(line, x, y + 286 + index * 34));
+  const beatTop = y + 104 + titleLines.length * (fittedHeadline + 4);
+  beatLines.forEach((line, index) => ctx.fillText(line, x, beatTop + index * 34));
 
   ctx.fillStyle = colors.panel;
-  roundRect(ctx, x, height - 166, maxWidth, 88, 8);
+  roundRect(ctx, x, height - 168, maxWidth, 90, 8);
   ctx.fill();
   ctx.strokeStyle = colors.panelStroke;
   ctx.stroke();
@@ -465,7 +461,7 @@ function drawCopy(
   narrationLines.forEach((line, index) => ctx.fillText(line, x + 18, height - 117 + index * 28));
 
   ctx.fillStyle = colors.primary;
-  roundRect(ctx, x, height - 52, maxWidth * progress, 6, 3);
+  roundRect(ctx, x, height - 54, Math.max(18, maxWidth * progress), 6, 3);
   ctx.fill();
 
   ctx.fillStyle = colors.muted;
@@ -494,33 +490,28 @@ function drawTimeline(ctx: CanvasRenderingContext2D, plan: PitchPlan, time: numb
   });
 }
 
-function drawChip(
-  ctx: CanvasRenderingContext2D,
-  x: number,
-  y: number,
-  width: number,
-  height: number,
-  text: string,
-  color: string,
-) {
-  ctx.fillStyle = "rgba(255,255,255,0.075)";
-  roundRect(ctx, x, y, width, height, 7);
+function drawEditorialCard(ctx: CanvasRenderingContext2D, x: number, y: number, width: number, height: number, colors: FrameColors) {
+  ctx.fillStyle = colors.panel;
+  roundRect(ctx, x, y, width, height, 10);
   ctx.fill();
-  ctx.fillStyle = color;
-  roundRect(ctx, x, y, 9, height, 5);
+  ctx.strokeStyle = colors.panelStroke;
+  ctx.lineWidth = 1;
+  ctx.stroke();
+
+  ctx.fillStyle = colors.primary;
+  ctx.globalAlpha = 0.12;
+  roundRect(ctx, x + 26, y + 24, width - 52, 10, 5);
   ctx.fill();
-  ctx.fillStyle = "#f1f3ed";
-  ctx.font = "650 22px Geist, Arial, sans-serif";
-  ctx.fillText(text, x + 24, y + 29);
+  ctx.globalAlpha = 1;
 }
 
-function drawNode(ctx: CanvasRenderingContext2D, x: number, y: number, label: string, color: string) {
+function drawNode(ctx: CanvasRenderingContext2D, x: number, y: number, label: string, color: string, colors: FrameColors) {
   ctx.fillStyle = color;
-  roundRect(ctx, x, y, 130, 58, 8);
+  roundRect(ctx, x, y, 126, 56, 8);
   ctx.fill();
-  ctx.fillStyle = "#080908";
-  ctx.font = "800 22px Geist, Arial, sans-serif";
-  ctx.fillText(label, x + 22, y + 37);
+  ctx.fillStyle = color === colors.accent ? colors.ink : "#ffffff";
+  ctx.font = "800 21px Geist, Arial, sans-serif";
+  fitText(ctx, label, x + 18, y + 36, 92);
 }
 
 function drawArrow(
@@ -542,13 +533,16 @@ function drawArrow(
   ctx.stroke();
 }
 
-function drawMiniPanel(ctx: CanvasRenderingContext2D, x: number, y: number, width: number, height: number, label: string, color: string) {
-  ctx.fillStyle = "rgba(255,255,255,0.08)";
+function drawMiniPanel(ctx: CanvasRenderingContext2D, x: number, y: number, width: number, height: number, label: string, color: string, colors: FrameColors) {
+  ctx.fillStyle = color;
   roundRect(ctx, x, y, width, height, 7);
   ctx.fill();
-  ctx.fillStyle = color;
-  ctx.font = "750 20px Geist, Arial, sans-serif";
-  ctx.fillText(label, x + 18, y + 40);
+  ctx.fillStyle = color === colors.primary ? "#ffffff" : colors.ink;
+  ctx.font = "760 20px Geist, Arial, sans-serif";
+  ctx.fillText(label, x + 54, y + 34);
+  ctx.fillStyle = color === colors.primary ? "rgba(255,255,255,0.7)" : colors.muted;
+  ctx.font = "800 14px Geist Mono, monospace";
+  ctx.fillText("STEP", x + 18, y + 34);
 }
 
 function roundRect(ctx: CanvasRenderingContext2D, x: number, y: number, width: number, height: number, radius: number) {
@@ -618,16 +612,31 @@ function drawImageCropCover(
   ctx.drawImage(image, sx, sy, sw, sh, x, y, width, height);
 }
 
-function animatedCameraCrop(cameraPlan: CameraPlan, progress: number): CameraCrop {
+function animatedCameraCrop(plan: PitchPlan, scene: PitchScene, cameraPlan: CameraPlan, progress: number): CameraCrop {
   const target = cameraPlan.crop || { x: 0, y: 0, width: 1, height: 1 };
   if (cameraPlan.mode === "wide") return { x: 0, y: 0, width: 1, height: 1 };
-  const blend = cameraPlan.easing === "linear" ? Math.min(1, progress / 0.28) : easeOutCubic(Math.min(1, progress / 0.34));
+  const previous = previousDemoCrop(plan, scene);
+  const blendProgress = Math.min(1, progress / 0.42);
+  const blend = cameraPlan.easing === "linear" ? blendProgress : smoothstep(blendProgress);
   return {
-    x: lerp(0, target.x, blend),
-    y: lerp(0, target.y, blend),
-    width: lerp(1, target.width, blend),
-    height: lerp(1, target.height, blend),
+    x: lerp(previous.x, target.x, blend),
+    y: lerp(previous.y, target.y, blend),
+    width: lerp(previous.width, target.width, blend),
+    height: lerp(previous.height, target.height, blend),
   };
+}
+
+function previousDemoCrop(plan: PitchPlan, scene: PitchScene): CameraCrop {
+  const index = plan.scenes.findIndex((candidate) => candidate.id === scene.id);
+  if (index <= 0) return { x: 0, y: 0, width: 1, height: 1 };
+  for (let i = index - 1; i >= 0; i -= 1) {
+    const previousScene = plan.scenes[i];
+    if (!isDemoScene(previousScene)) break;
+    const previousPlan = normalizeCameraPlan(previousScene.cameraPlan, previousScene);
+    if (previousPlan.mode !== "wide" && previousPlan.crop) return previousPlan.crop;
+    return { x: 0, y: 0, width: 1, height: 1 };
+  }
+  return { x: 0, y: 0, width: 1, height: 1 };
 }
 
 function drawCameraVignette(ctx: CanvasRenderingContext2D, width: number, height: number, cameraPlan: CameraPlan, colors: FrameColors) {
@@ -650,11 +659,13 @@ function drawCameraVignette(ctx: CanvasRenderingContext2D, width: number, height
 }
 
 function wrapText(ctx: CanvasRenderingContext2D, text: string, maxWidth: number, maxLines: number) {
-  const words = text.split(/\s+/).filter(Boolean);
+  const cleaned = text.replace(/\s+/g, " ").trim();
+  const charMode = !cleaned.includes(" ");
+  const words = charMode ? Array.from(cleaned) : cleaned.split(" ").filter(Boolean);
   const lines: string[] = [];
   let line = "";
   for (const word of words) {
-    const next = line ? `${line} ${word}` : word;
+    const next = line ? (charMode ? `${line}${word}` : `${line} ${word}`) : word;
     if (ctx.measureText(next).width <= maxWidth || !line) {
       line = next;
     } else {
@@ -664,10 +675,32 @@ function wrapText(ctx: CanvasRenderingContext2D, text: string, maxWidth: number,
     if (lines.length === maxLines) break;
   }
   if (line && lines.length < maxLines) lines.push(line);
-  if (lines.length === maxLines && words.join(" ").length > lines.join(" ").length) {
+  const original = charMode ? words.join("") : words.join(" ");
+  const rendered = charMode ? lines.join("") : lines.join(" ");
+  if (lines.length === maxLines && original.length > rendered.length) {
     lines[maxLines - 1] = `${lines[maxLines - 1].replace(/[.,;:!?]$/, "")}...`;
   }
   return lines;
+}
+
+function fitWrappedFont(
+  ctx: CanvasRenderingContext2D,
+  text: string,
+  maxWidth: number,
+  maxLines: number,
+  maxSize: number,
+  minSize: number,
+  weight: number,
+) {
+  let size = maxSize;
+  while (size > minSize) {
+    ctx.font = `${weight} ${size}px Geist, Arial, sans-serif`;
+    const lines = wrapText(ctx, text, maxWidth, maxLines);
+    if (lines.every((line) => ctx.measureText(line).width <= maxWidth)) break;
+    size -= 2;
+  }
+  ctx.font = `${weight} ${size}px Geist, Arial, sans-serif`;
+  return size;
 }
 
 function fitText(ctx: CanvasRenderingContext2D, text: string, x: number, y: number, maxWidth: number) {
@@ -686,8 +719,9 @@ function lerp(from: number, to: number, progress: number) {
   return from + (to - from) * progress;
 }
 
-function easeOutCubic(value: number) {
-  return 1 - Math.pow(1 - value, 3);
+function smoothstep(value: number) {
+  const t = Math.min(1, Math.max(0, value));
+  return t * t * (3 - 2 * t);
 }
 
 function themedColors(base: { primary: string; secondary: string; accent: string }, deckStyle: DeckStyle): FrameColors {
@@ -695,13 +729,13 @@ function themedColors(base: { primary: string; secondary: string; accent: string
   if (deckStyle.theme === "paper") {
     return {
       primary,
-      secondary: "#e7ecf2",
-      accent: "#1f2937",
-      bgStart: "#f8fafc",
-      bgMid: "#eef3f8",
+      secondary: "#f8fafc",
+      accent: base.primary === primary ? base.accent : "#dbeafe",
+      bgStart: "#fbfcfe",
+      bgMid: "#eef4ff",
       ink: "#111827",
-      muted: "#475569",
-      panel: "rgba(255,255,255,0.78)",
+      muted: "#526070",
+      panel: "rgba(255,255,255,0.84)",
       panelStroke: "rgba(15,23,42,0.12)",
     };
   }
@@ -733,13 +767,13 @@ function themedColors(base: { primary: string; secondary: string; accent: string
   }
   return {
     primary,
-    secondary: base.secondary,
+    secondary: "#f1f5f9",
     accent: base.accent,
-    bgStart: "#070807",
-    bgMid: "#111512",
-    ink: "#f1f3ed",
-    muted: "#aab3a8",
-    panel: "rgba(8,9,8,0.64)",
-    panelStroke: "rgba(255,255,255,0.12)",
+    bgStart: "#f8fafc",
+    bgMid: "#e8eef7",
+    ink: "#0f172a",
+    muted: "#5f6b7a",
+    panel: "rgba(255,255,255,0.8)",
+    panelStroke: "rgba(15,23,42,0.12)",
   };
 }
