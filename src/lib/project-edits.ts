@@ -1,9 +1,21 @@
+import { inferVisualIntent, normalizeCameraPlan } from "@/lib/semantic-director";
 import type { PitchPlan, PitchScene, VisualMode } from "@/lib/types";
 
 export type EditableScenePatch = Partial<
   Pick<
     PitchScene,
-    "title" | "beat" | "narration" | "onScreenText" | "visual" | "duration" | "sourceSegmentId" | "mediaAssetId" | "trimStart" | "trimEnd"
+    | "title"
+    | "beat"
+    | "narration"
+    | "onScreenText"
+    | "visual"
+    | "duration"
+    | "sourceSegmentId"
+    | "mediaAssetId"
+    | "trimStart"
+    | "trimEnd"
+    | "visualIntent"
+    | "cameraPlan"
   >
 >;
 
@@ -54,7 +66,7 @@ export function normalizePitchTimeline(plan: PitchPlan): PitchPlan {
   const scenes = plan.scenes.map((scene, index) => {
     const duration = Number.isFinite(Number(scene.duration)) ? Math.max(1, Number(scene.duration)) : 1;
     const visual = visualModes.includes(scene.visual) ? scene.visual : "workflow";
-    const normalized = {
+    const normalized: PitchScene = {
       ...scene,
       id: scene.id || `scene-${index + 1}`,
       title: scene.title || `Scene ${index + 1}`,
@@ -66,6 +78,8 @@ export function normalizePitchTimeline(plan: PitchPlan): PitchPlan {
       trimEnd: normalizeOptionalTime(scene.trimEnd),
       duration,
       start,
+      visualIntent: scene.visualIntent || inferVisualIntent({ ...scene, visual, duration, start }),
+      cameraPlan: normalizeCameraPlan(scene.cameraPlan, { ...scene, visual, duration, start }),
     };
     start += duration;
     return normalized;
@@ -81,13 +95,18 @@ export function normalizePitchTimeline(plan: PitchPlan): PitchPlan {
 function normalizeScenePatch(scene: PitchScene, patch: EditableScenePatch): PitchScene {
   const trimStart = patch.trimStart === undefined ? scene.trimStart : normalizeOptionalTime(patch.trimStart);
   const trimEnd = patch.trimEnd === undefined ? scene.trimEnd : normalizeOptionalTime(patch.trimEnd);
-  return {
+  const patched = {
     ...scene,
     ...patch,
     visual: patch.visual && visualModes.includes(patch.visual) ? patch.visual : scene.visual,
     duration: patch.duration === undefined ? scene.duration : Math.max(1, Number(patch.duration) || 1),
     trimStart,
     trimEnd: trimEnd !== undefined && trimStart !== undefined && trimEnd <= trimStart ? undefined : trimEnd,
+  };
+  return {
+    ...patched,
+    visualIntent: patch.visualIntent || inferVisualIntent(patched),
+    cameraPlan: normalizeCameraPlan(patch.cameraPlan || patched.cameraPlan, patched),
   };
 }
 

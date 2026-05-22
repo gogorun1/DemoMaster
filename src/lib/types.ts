@@ -2,6 +2,29 @@ export type VisualMode = "presenter" | "problem" | "product" | "workflow" | "evi
 export type DeckTheme = "graphite" | "studio" | "paper" | "midnight";
 export type DeckDensity = "compact" | "balanced" | "bold";
 export type DemoCaptionStyle = "bar" | "pill" | "none";
+export type CameraMode = "wide" | "focus" | "follow" | "manual";
+
+export interface CameraCrop {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+export interface CameraPlan {
+  mode: CameraMode;
+  focusLabel?: string;
+  crop?: CameraCrop;
+  zoom?: number;
+  padding?: number;
+  easing?: "smooth" | "linear";
+}
+
+export interface VisualIntent {
+  summary: string;
+  targetHint?: string;
+  confidence?: number;
+}
 
 export interface VoiceSettings {
   voiceName: string;
@@ -164,6 +187,8 @@ export interface PitchScene {
   mediaAssetId?: string;
   trimStart?: number;
   trimEnd?: number;
+  visualIntent?: VisualIntent;
+  cameraPlan?: CameraPlan;
 }
 
 export interface PitchPlan {

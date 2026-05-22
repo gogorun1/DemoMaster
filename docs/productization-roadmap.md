@@ -96,6 +96,16 @@ Acceptance checks:
 
 Goal: harden the studio for repeatable customer use.
 
+Delivered:
+
+- Replaced the long, flat result page with a focused video workbench, right-side inspector tabs, and a collapsed run details section.
+- Split generation status into user-legible phases: pitch, capture, align, preview, and ready.
+- Removed the misleading idea that final video rendering happens during generation; export remains a separate user-triggered action.
+- Added a semantic director foundation that infers visual intent and camera plans from each scene's script.
+- Added per-demo-scene camera mode, focus target, and normalized crop controls.
+- Upgraded demo rendering to use smooth crop/zoom camera motion for focused UI moments such as input blocks, model selectors, navigation, and generated output areas.
+- Improved deck rendering hierarchy with stronger typographic composition and cleaner evidence panels.
+
 Planned:
 
 - Project persistence.
@@ -104,6 +114,8 @@ Planned:
 - Team-safe capture controls.
 - Robust onboarding and empty states.
 - Error recovery for failed AI, failed capture, and stale media.
+- Replace heuristic camera inference with Playwright DOM, accessibility tree, and bounding-box evidence.
+- Migrate `RenderScript` scenes, camera keyframes, overlays, and assets into a Remotion composition.
 
 Acceptance checks:
 
