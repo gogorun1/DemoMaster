@@ -732,6 +732,7 @@ function localCreativeDraft(
   analysis: ProductAnalysis,
   strategy: PitchStrategy,
 ): PitchDraft {
+  const directAppMode = repo.source !== "github" && Boolean(repo.homepage);
   const productName = cleanString(analysis.productName) || repo.repo || "Demo";
   const corePromise = cleanString(strategy.corePromise) || cleanString(analysis.userNeed) || "Turn a repository into a clear product demo.";
   const positioning = cleanString(strategy.positioning) || `${productName} turns code evidence into a judge-ready product story.`;
@@ -821,7 +822,7 @@ function localCreativeDraft(
     positioning,
     strategy: cleanString(strategy.strategy) || "Use repo evidence and browser capture to turn a working product into a credible narrated pitch.",
     score: 86,
-    cta: `Paste ${request.repoUrl.includes("github.com") ? "a GitHub repo" : "a repository URL"} and let the agents build the pitch from the real product.`,
+    cta: `Paste ${request.repoUrl.includes("github.com") ? "a GitHub repo" : directAppMode ? "a live app URL" : "a repository URL"} and let the agents build the pitch from the real product.`,
     insights: cleanStringArray(strategy.insightStack).length
       ? cleanStringArray(strategy.insightStack).slice(0, 6)
       : [
@@ -834,7 +835,7 @@ function localCreativeDraft(
       userNeed: cleanString(analysis.userNeed) || corePromise,
       productShape: cleanString(analysis.productShape) || `${productName} is a web app that turns a repository into a narrated demo pitch.`,
       experienceFlow: flow.length ? flow.slice(0, 6) : [
-        "Paste a repository URL.",
+        directAppMode ? "Paste a live app URL." : "Paste a repository URL.",
         "Agents inspect product evidence.",
         "The browser records the running demo.",
         "The script is aligned to the capture.",
@@ -933,9 +934,9 @@ function buildAgentPrompt(agentName: string, request: PitchRequest, repo: RepoCo
     `You are ${agentName} inside DemoMaster.`,
     "",
     "Product context:",
-    "- DemoMaster converts one demo repository URL into a narrated product pitch video.",
-    "- The pitch output must describe the input repository's product, not DemoMaster itself.",
-    "- A production-grade pitch should include real footage from a hosted demo URL or from the repo running in a temporary local runner.",
+    "- DemoMaster converts one GitHub repository URL or live app URL into a narrated product pitch video.",
+    "- The pitch output must describe the input product, not DemoMaster itself.",
+    "- A production-grade pitch should include real footage from the provided hosted demo URL, a discovered hosted demo URL, or the repo running in a temporary local runner.",
     "- The target hackathon is AI Agent Olympics at Milan AI Week.",
     "- The stack should emphasize Google Gemini; Featherless is optional for critique; Speechmatics verifies generated narration; Playwright records browser footage.",
     "- Do not use an external video database or reference-video input.",
@@ -1153,8 +1154,8 @@ function normalizeCapturePlan(
     : fallback.steps;
 
   return {
-    source: plan?.source === "public-url" && (plan.targetUrl || repo.homepage) ? "public-url" : "local-runner",
-    targetUrl: cleanString(plan?.targetUrl) || repo.homepage || fallback.targetUrl,
+    source: publicCaptureTarget(plan, repo, fallback) ? "public-url" : "local-runner",
+    targetUrl: publicCaptureTarget(plan, repo, fallback),
     installCommand: cleanString(plan?.installCommand) || fallback.installCommand,
     runCommand: cleanString(plan?.runCommand) || fallback.runCommand,
     port: clamp(Number(plan?.port) || fallback.port || 3000, 1024, 65535),
@@ -1163,6 +1164,15 @@ function normalizeCapturePlan(
       cleanString(plan?.message) ||
       "DemoMaster will capture a hosted demo URL first, then clone and run the repo locally if needed.",
   };
+}
+
+function publicCaptureTarget(plan: DemoCapturePlan | undefined, repo: RepoContext, fallback: DemoCapturePlan) {
+  const target = cleanString(plan?.targetUrl) || repo.homepage || fallback.targetUrl;
+  if (!target) return undefined;
+  if (plan?.source === "public-url") return target;
+  if (repo.source !== "github" && repo.homepage) return target;
+  if (fallback.source === "public-url") return target;
+  return undefined;
 }
 
 function normalizeReport(report: ProductReport | undefined, fallback: ProductReport): ProductReport {

@@ -2,6 +2,7 @@ import type { AgentLog, PartnerCapability, PitchPlan, PitchRequest, RepoContext 
 
 export function fallbackPitchPlan(request: PitchRequest, repo: RepoContext): PitchPlan {
   const productName = titleCase((repo.repo || inferNameFromUrl(request.repoUrl) || "DemoMaster").replace(/[-_]/g, " "));
+  const directAppMode = repo.source !== "github" && Boolean(repo.homepage);
   const primaryUser = "hackathon builders, founders, and technical teams who need a credible demo pitch fast";
   const scenes = [
     {
@@ -65,7 +66,9 @@ export function fallbackPitchPlan(request: PitchRequest, repo: RepoContext): Pit
     positioning: "Built for AI Agent Olympics style demos: agentic reasoning, visible process, and a real media output.",
     strategy: "Lead with the gap between code and story, prove repo understanding, show the agent quality loop, then deliver a narrated video package.",
     score: repo.source === "github" ? 78 : 66,
-    cta: "Paste a public GitHub repository and generate the pitch video package.",
+    cta: directAppMode
+      ? "Paste a live product URL and let the agents build a pitch around the captured demo."
+      : "Paste a public GitHub repository and generate the pitch video package.",
     insights: [
       "The product should ask for only one thing: the repository.",
       "The strongest UX is an agent run with transparent checkpoints, not a long configuration form.",
@@ -78,7 +81,7 @@ export function fallbackPitchPlan(request: PitchRequest, repo: RepoContext): Pit
       userNeed: "Builders need to turn a working demo into a clear, investor- or judge-ready story under time pressure.",
       productShape: "A single-input pitch studio: repo in, agentic analysis in the middle, narrated video out.",
       experienceFlow: [
-        "Paste repository URL.",
+        directAppMode ? "Paste live app URL." : "Paste repository URL.",
         "Watch specialized agents inspect, position, script, and judge the story.",
         "Review the generated pitch video, transcript, and evidence-backed scene plan.",
         "Export the narrated WebM for submission or iteration.",
@@ -149,7 +152,9 @@ export function fallbackPitchPlan(request: PitchRequest, repo: RepoContext): Pit
         },
       ],
       message: repo.homepage
-        ? "Use the public homepage as the fastest capture target; local runner remains available if the public URL fails."
+        ? directAppMode
+          ? "Use the provided app URL as the capture target; no repository clone is required."
+          : "Use the public homepage as the fastest capture target; local runner remains available if the public URL fails."
         : "Clone the repo into a temporary local runner, install dependencies, start the app, and capture browser footage.",
     },
     generatedAt: new Date().toISOString(),

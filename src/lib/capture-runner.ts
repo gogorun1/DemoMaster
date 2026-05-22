@@ -553,18 +553,23 @@ function cleanInline(value: string) {
 }
 
 function publicUrlCandidates(repo: RepoContext, plan: DemoCapturePlan) {
-  const urls = [
-    repo.repoUrl,
+  const explicitUrls = [
     plan.targetUrl,
     repo.homepage,
-    ...repo.files.flatMap((file) => extractUrls(file.content)),
+    repo.source !== "github" ? repo.repoUrl : undefined,
   ]
     .filter((url): url is string => Boolean(url))
     .map((url) => normalizePublicUrl(url))
     .filter((url): url is string => Boolean(url))
+    .filter(isExplicitCaptureCandidate);
+
+  const discoveredUrls = repo.files
+    .flatMap((file) => extractUrls(file.content))
+    .map((url) => normalizePublicUrl(url))
+    .filter((url): url is string => Boolean(url))
     .filter(isCaptureCandidate);
 
-  return [...new Set(urls)].sort((a, b) => publicUrlScore(b) - publicUrlScore(a));
+  return [...new Set([...explicitUrls, ...discoveredUrls])].sort((a, b) => publicUrlScore(b) - publicUrlScore(a));
 }
 
 function extractUrls(text: string) {
@@ -587,6 +592,19 @@ function isCaptureCandidate(raw: string) {
     if (!["http:", "https:"].includes(url.protocol)) return false;
     const host = url.hostname.toLowerCase();
     if (isPrivateHost(host)) return false;
+    if (host === "github.com" || host.endsWith(".github.com")) return false;
+    if (/\.(png|jpe?g|gif|webp|svg|mp4|mov|mp3|wav|zip|tar|gz|pdf)$/i.test(url.pathname)) return false;
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function isExplicitCaptureCandidate(raw: string) {
+  try {
+    const url = new URL(raw);
+    if (!["http:", "https:"].includes(url.protocol)) return false;
+    const host = url.hostname.toLowerCase();
     if (host === "github.com" || host.endsWith(".github.com")) return false;
     if (/\.(png|jpe?g|gif|webp|svg|mp4|mov|mp3|wav|zip|tar|gz|pdf)$/i.test(url.pathname)) return false;
     return true;

@@ -84,7 +84,7 @@ export async function POST(request: Request) {
 }
 
 function sanitizeRequest(payload: Partial<PitchRequest>): PitchRequest {
-  if (!payload.repoUrl?.trim()) throw new Error("A GitHub repository URL is required.");
+  if (!payload.repoUrl?.trim()) throw new Error("A GitHub repository URL or live app URL is required.");
   return { repoUrl: payload.repoUrl.trim() };
 }
 

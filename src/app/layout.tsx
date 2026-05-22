@@ -83,7 +83,7 @@ const hydrationFallbackScript = String.raw`
     const button = document.querySelector("[data-demomaster-generate]");
     const repoUrl = input?.value?.trim();
     if (!repoUrl) {
-      line("Repository URL is required.");
+      line("Repository or app URL is required.");
       document.documentElement.dataset.demomasterNativeRunning = "false";
       return;
     }

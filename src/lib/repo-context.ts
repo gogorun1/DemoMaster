@@ -46,15 +46,34 @@ export function parseGitHubUrl(input: string) {
   }
 }
 
+export function isDirectAppUrl(input: string) {
+  try {
+    const url = new URL(input.trim());
+    if (!["http:", "https:"].includes(url.protocol)) return false;
+    const host = url.hostname.toLowerCase();
+    if (host === "github.com" || host.endsWith(".github.com")) return false;
+    if (/\.git$/i.test(url.pathname)) return false;
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 export async function loadRepoContext(repoUrl: string): Promise<RepoContext> {
   const parsed = parseGitHubUrl(repoUrl);
   if (!parsed) {
+    const directAppUrl = isDirectAppUrl(repoUrl);
     return {
       source: "manual",
       repoUrl,
+      homepage: directAppUrl ? repoUrl : undefined,
       fileTree: [],
       files: [],
-      warnings: ["Only GitHub repository URLs are automatically inspected in this MVP."],
+      warnings: [
+        directAppUrl
+          ? "Direct app URL mode: repository inspection is skipped and the URL is used as the hosted capture target."
+          : "Only GitHub repository URLs are automatically inspected in this MVP.",
+      ],
     };
   }
 
