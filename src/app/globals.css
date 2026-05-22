@@ -789,6 +789,65 @@ a {
   text-decoration: none;
 }
 
+.capture-manifest {
+  display: grid;
+  gap: 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface-2);
+  padding: 11px;
+}
+
+.capture-manifest-head,
+.capture-manifest li {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.capture-manifest-head strong,
+.capture-manifest li strong {
+  color: var(--ink);
+  font-size: 13px;
+}
+
+.capture-manifest-head span {
+  color: var(--soft);
+  font-family: "Geist Mono", "Geist Mono Fallback", ui-monospace, monospace;
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.capture-manifest ul {
+  display: grid;
+  gap: 9px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.capture-manifest li {
+  justify-content: flex-start;
+}
+
+.capture-manifest li div {
+  min-width: 0;
+}
+
+.capture-manifest li p,
+.capture-manifest-warning {
+  margin: 3px 0 0;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.42;
+}
+
+.capture-manifest-warning {
+  border-top: 1px solid var(--line);
+  padding-top: 9px;
+}
+
 .agent-panel {
   border: 1px solid var(--line);
   border-radius: 8px;

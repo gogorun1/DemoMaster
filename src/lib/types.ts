@@ -69,8 +69,35 @@ export interface DemoCaptureResult {
   screenshotUrl?: string;
   videoUrl?: string;
   interactionSummary?: string[];
+  manifest?: DemoCaptureManifest;
   message: string;
   logs: AgentLogEntry[];
+}
+
+export interface DemoCaptureSegment {
+  id: string;
+  label: string;
+  actionSummary: string;
+  startMs: number;
+  endMs: number;
+  source: "interaction" | "recording" | "screenshot" | "fallback";
+  videoUrl?: string;
+  screenshotUrl?: string;
+  narrationHint?: string;
+}
+
+export interface DemoCaptureManifest {
+  version: 1;
+  provider: DemoCaptureResult["provider"];
+  status: DemoCaptureResult["status"];
+  runId?: string;
+  targetUrl?: string;
+  primaryVideoUrl?: string;
+  primaryScreenshotUrl?: string;
+  capturedAt?: string;
+  durationMs: number;
+  segments: DemoCaptureSegment[];
+  warnings: string[];
 }
 
 export interface AgentLogEntry {
