@@ -464,6 +464,10 @@ a {
   grid-column: 1;
 }
 
+.inspector-panel .camera-details-grid {
+  grid-template-columns: 1fr;
+}
+
 .camera-grid {
   display: grid;
   gap: 12px;
@@ -674,6 +678,32 @@ a {
 }
 
 .scene-editor-grid .wide {
+  grid-column: 1 / -1;
+}
+
+.camera-details {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
+  padding: 10px 12px;
+}
+
+.camera-details summary {
+  cursor: pointer;
+  color: var(--ink);
+  font-size: 13px;
+  font-weight: 800;
+  list-style-position: outside;
+}
+
+.camera-details-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  margin-top: 12px;
+}
+
+.camera-details-grid .wide {
   grid-column: 1 / -1;
 }
 
@@ -1123,6 +1153,7 @@ a {
   .run-details-grid,
   .capture-layout,
   .scene-editor-grid,
+  .camera-details-grid,
   .settings-grid,
   .media-controls,
   .url-import-row {

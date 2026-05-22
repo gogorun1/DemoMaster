@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef } from "react";
-import { drawPitchFrame, getSceneAtTime, getSceneMediaPlaybackTime, isDemoScene } from "@/lib/render-frame";
+import { drawPitchFrame, getPresentationMediaTime, getSceneAtTime, shouldPlayPresentationMedia } from "@/lib/render-frame";
 import type { DemoCaptureResult, PitchPlan, ProjectMediaAsset } from "@/lib/types";
 
 interface VideoCanvasProps {
@@ -42,7 +42,12 @@ export function VideoCanvas({ plan, currentTime, capture, mediaAsset }: VideoCan
         const canvas = canvasRef.current;
         const context = canvas?.getContext("2d");
         const frame = latestFrameRef.current;
-        if (canvas && context) drawPitchFrame(context, frame.plan, frame.currentTime, drawableMedia(video));
+        if (canvas && context) {
+          syncPreviewVideo(video, frame.plan, frame.currentTime, playbackStateRef.current, () => {
+            drawPitchFrame(context, frame.plan, frame.currentTime, drawableMedia(video));
+          });
+          drawPitchFrame(context, frame.plan, frame.currentTime, drawableMedia(video));
+        }
       };
       video.src = videoUrl;
       return () => {
@@ -72,31 +77,49 @@ export function VideoCanvas({ plan, currentTime, capture, mediaAsset }: VideoCan
     const canvas = canvasRef.current;
     const context = canvas?.getContext("2d");
     if (!canvas || !context) return;
-    const media = drawableMedia(captureMediaRef.current);
-    if (media instanceof HTMLVideoElement) syncPreviewVideo(media, plan, currentTime, playbackStateRef.current);
+    const media = captureMediaRef.current;
+    if (media instanceof HTMLVideoElement) {
+      syncPreviewVideo(media, plan, currentTime, playbackStateRef.current, () => {
+        drawPitchFrame(context, plan, currentTime, drawableMedia(media));
+      });
+    }
     drawPitchFrame(context, plan, currentTime, drawableMedia(media));
   }, [currentTime, plan]);
 
   return <canvas ref={canvasRef} width={1280} height={720} aria-label="Generated pitch video preview" />;
 }
 
-function syncPreviewVideo(video: HTMLVideoElement, plan: PitchPlan, currentTime: number, playbackState: { active: boolean; lastTime: number; sceneId?: string }) {
+function syncPreviewVideo(
+  video: HTMLVideoElement,
+  plan: PitchPlan,
+  currentTime: number,
+  playbackState: { active: boolean; lastTime: number; sceneId?: string },
+  onSeeked: () => void,
+) {
   const scene = getSceneAtTime(plan, currentTime);
-  if (!isDemoScene(scene)) {
+  const shouldPlay = shouldPlayPresentationMedia(plan, currentTime);
+  const hasDuration = Number.isFinite(video.duration) && video.duration > 0;
+  const targetTime = hasDuration ? getPresentationMediaTime(plan, currentTime, video.duration) : 0;
+
+  if (!shouldPlay) {
     video.pause();
+    if (hasDuration && Math.abs(video.currentTime - targetTime) > 0.08) {
+      video.addEventListener("seeked", onSeeked, { once: true });
+      video.currentTime = targetTime;
+    }
     playbackState.active = false;
     playbackState.sceneId = undefined;
     playbackState.lastTime = currentTime;
     return;
   }
 
-  if (Number.isFinite(video.duration) && video.duration > 0) {
+  if (hasDuration) {
     const trimStart = Math.min(Math.max(0, scene.trimStart ?? 0), Math.max(0, video.duration - 0.05));
     const trimEnd = scene.trimEnd !== undefined && scene.trimEnd > trimStart ? Math.min(scene.trimEnd, video.duration) : video.duration;
     const mediaSpan = Math.max(1, trimEnd - trimStart);
     video.playbackRate = Math.max(0.1, Math.min(2, mediaSpan / Math.max(1, scene.duration)));
     if (!playbackState.active || playbackState.sceneId !== scene.id || currentTime < playbackState.lastTime) {
-      video.currentTime = getSceneMediaPlaybackTime(plan, currentTime, video.duration);
+      video.currentTime = targetTime;
       playbackState.active = true;
       playbackState.sceneId = scene.id;
     }
