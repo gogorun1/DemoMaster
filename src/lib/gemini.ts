@@ -1,5 +1,6 @@
 import { GoogleGenAI } from "@google/genai";
 import { buildPartnerStack, fallbackAgentLogs, fallbackPitchPlan } from "@/lib/fallback";
+import { normalizeVoiceSettings } from "@/lib/project-settings";
 import type {
   AgentLog,
   AgentLogEntry,
@@ -210,7 +211,8 @@ export async function generateNarrationAudio(plan: PitchPlan): Promise<AudioResu
   }
 
   try {
-    const voice = process.env.GEMINI_AUDIO_VOICE || process.env.GEMINI_TTS_VOICE || "Kore";
+    const voiceSettings = normalizeVoiceSettings(plan.voiceSettings);
+    const voice = voiceSettings.voiceName || process.env.GEMINI_AUDIO_VOICE || process.env.GEMINI_TTS_VOICE || "Kore";
     const response = await withTimeout(
       client.models.generateContent({
         model: process.env.GEMINI_AUDIO_MODEL || process.env.GEMINI_TTS_MODEL || "gemini-3.1-flash-tts-preview",
@@ -220,8 +222,8 @@ export async function generateNarrationAudio(plan: PitchPlan): Promise<AudioResu
               {
                 text: [
                   "Read this as a premium product pitch narrator.",
-                  "Tone: clear, warm, decisive, demo-stage confidence.",
-                  "Pacing: measured, energetic, no salesy exaggeration.",
+                  `Tone: ${voiceToneInstruction(voiceSettings.tone)}`,
+                  `Pacing: ${voicePacingInstruction(voiceSettings.pacing)}`,
                   "Keep the exact words of the script.",
                   "",
                   plan.narration,
@@ -262,6 +264,19 @@ export async function generateNarrationAudio(plan: PitchPlan): Promise<AudioResu
       message: friendlyProviderError(error, "Gemini narration failed."),
     };
   }
+}
+
+function voiceToneInstruction(tone: string) {
+  if (tone === "energetic") return "energetic, crisp, demo-stage confidence without hype.";
+  if (tone === "executive") return "executive, concise, authoritative, and boardroom-ready.";
+  if (tone === "clear") return "clear, neutral, precise, and easy to follow.";
+  return "warm, decisive, polished, and product-led.";
+}
+
+function voicePacingInstruction(pacing: string) {
+  if (pacing === "brisk") return "brisk and compact while staying intelligible.";
+  if (pacing === "calm") return "calm, unhurried, and deliberate.";
+  return "measured, energetic, no salesy exaggeration.";
 }
 
 export async function alignPitchWithCapture(
