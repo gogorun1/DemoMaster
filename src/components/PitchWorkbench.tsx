@@ -36,6 +36,24 @@ const sampleRepo = "https://github.com/vercel/ai-chatbot";
 const projectSchema = "demomaster.project";
 const projectVersion = 1;
 const visualModes: VisualMode[] = ["presenter", "problem", "product", "workflow", "evidence", "close"];
+type GenerationStage = "idle" | "understanding" | "capturing" | "aligning" | "preparing" | "ready" | "error";
+type InspectorTab = "script" | "media" | "style" | "voice" | "export";
+
+const inspectorTabs: Array<{ id: InspectorTab; label: string }> = [
+  { id: "script", label: "Script" },
+  { id: "media", label: "Media" },
+  { id: "style", label: "Style" },
+  { id: "voice", label: "Voice" },
+  { id: "export", label: "Export" },
+];
+
+const generationSteps: Array<{ id: GenerationStage; label: string }> = [
+  { id: "understanding", label: "Pitch" },
+  { id: "capturing", label: "Capture" },
+  { id: "aligning", label: "Align" },
+  { id: "preparing", label: "Preview" },
+  { id: "ready", label: "Ready" },
+];
 
 const liveRunSteps: Array<{ agent: AgentName; label: string; detail: string }> = [
   {
@@ -118,6 +136,8 @@ export function PitchWorkbench() {
   const [result, setResult] = useState<PitchResponse | null>(null);
   const [currentTime, setCurrentTime] = useState(0);
   const [isGenerating, setIsGenerating] = useState(false);
+  const [generationStage, setGenerationStage] = useState<GenerationStage>("idle");
+  const [inspectorTab, setInspectorTab] = useState<InspectorTab>("script");
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
   const [liveAgentLogs, setLiveAgentLogs] = useState<AgentLog[]>([]);
   const [liveMessage, setLiveMessage] = useState("");
@@ -135,6 +155,7 @@ export function PitchWorkbench() {
 
   const totalDuration = useMemo(() => (result ? getTotalDuration(result.pitch) : 0), [result]);
   const activeMediaAsset = useMemo(() => getActiveMediaAsset(result, currentTime), [currentTime, result]);
+  const currentScene = useMemo(() => (result ? getSceneAtTime(result.pitch, currentTime) : undefined), [currentTime, result]);
 
   useEffect(() => {
     document.documentElement.dataset.demomasterHydrated = "true";
@@ -179,6 +200,7 @@ export function PitchWorkbench() {
   async function startGeneration() {
     if (isGenerating) return;
     setIsGenerating(true);
+    setGenerationStage("understanding");
     setElapsedSeconds(0);
     setLiveAgentLogs([]);
     setLiveMessage("Starting agent run.");
@@ -227,10 +249,14 @@ export function PitchWorkbench() {
       if (!finalResult) throw new Error("Generation ended before a pitch response was returned.");
       finalResult = normalizePitchResult(finalResult);
       setResult(finalResult);
+      setGenerationStage("capturing");
       finalResult = await runAutomaticCapture(finalResult);
+      setGenerationStage("preparing");
       setResult(normalizePitchResult(finalResult));
       setCurrentTime(0);
+      setGenerationStage("ready");
     } catch (generationError) {
+      setGenerationStage("error");
       setError(generationError instanceof Error ? generationError.message : "Generation failed.");
     } finally {
       setIsGenerating(false);
@@ -241,6 +267,7 @@ export function PitchWorkbench() {
     let nextResult = baseResult;
 
     try {
+      setGenerationStage("capturing");
       setLiveMessage("Capturing the demo: public URL first, local runner if needed.");
       const captureResponse = await fetch("/api/capture", {
         method: "POST",
@@ -264,6 +291,7 @@ export function PitchWorkbench() {
         return nextResult;
       }
 
+      setGenerationStage("aligning");
       setLiveMessage("Rewriting the final pitch so the script matches the captured footage.");
       const alignResponse = await fetch("/api/pitch/align", {
         method: "POST",
@@ -591,7 +619,15 @@ export function PitchWorkbench() {
     }
   }
 
-  const heroStatus = isGenerating ? "Agents running" : result?.pitch.mode === "agentic" ? "Pitch ready" : result ? "Fallback ready" : "Ready";
+  const heroStatus = isExporting
+    ? "Exporting video"
+    : isAudioRefreshing
+      ? "Regenerating voice"
+      : isGenerating
+        ? generationLabel(generationStage)
+        : result
+          ? "Ready to edit/export"
+          : "Ready";
 
   return (
     <main className="app-shell" data-demomaster-root>
@@ -642,50 +678,25 @@ export function PitchWorkbench() {
           <section className="panel compact">
             <div className="panel-heading">
               <Brain size={18} />
-              <h2>Agent run</h2>
+              <h2>Generation</h2>
             </div>
-            {isGenerating ? (
-              <LiveAgentRun logs={liveAgentLogs} message={liveMessage} elapsedSeconds={elapsedSeconds} />
-            ) : result ? (
-              <ul className="run-list">
-                {result.agentLogs.map((log) => (
-                  <li key={log.agent}>
-                    <CheckCircle2 size={14} />
-                    <span>{log.agent}</span>
-                  </li>
-                ))}
-              </ul>
-            ) : (
-              <p className="muted-copy">Gemini agents will inspect, position, script, judge, and render from the repository.</p>
-            )}
+            <GenerationProgress
+              stage={generationStage}
+              isGenerating={isGenerating}
+              elapsedSeconds={elapsedSeconds}
+              message={liveMessage}
+              liveLogs={liveAgentLogs}
+              result={result}
+            />
           </section>
-
-          {result ? (
-            <section className="panel compact">
-              <div className="panel-heading">
-                <Code2 size={18} />
-                <h2>Partner stack</h2>
-              </div>
-              <ul className="stack-list">
-                {result.pitch.partnerStack.map((partner) => (
-                  <li key={partner.name}>
-                    <span className={`small-status ${partner.status}`}>{partner.status}</span>
-                    <div>
-                      <strong>{partner.name}</strong>
-                      <p>{partner.role}</p>
-                      <small>{partner.detail}</small>
-                    </div>
-                  </li>
-                ))}
-              </ul>
-            </section>
-          ) : null}
         </aside>
 
         <section className="main" data-demomaster-output>
           {result ? (
             <>
-              <section className="stage">
+              <section className="editor-grid">
+                <div className="preview-column">
+                  <section className="stage">
                 <div className="stage-meta">
                   <div>
                     <span className="eyebrow">
@@ -737,9 +748,32 @@ export function PitchWorkbench() {
                     Download final pitch video
                   </a>
                 ) : null}
-              </section>
+                  </section>
+                  {currentScene ? (
+                    <div className="scene-strip">
+                      <span className="timecode">{formatTime(currentScene.start)}</span>
+                      <strong>{currentScene.title}</strong>
+                      <p>{currentScene.visualIntent?.summary || currentScene.beat}</p>
+                    </div>
+                  ) : null}
+                </div>
 
-              <section className="panel project-toolbar">
+                <aside className="inspector-panel">
+                  <div className="inspector-tabs" role="tablist" aria-label="Project editor">
+                    {inspectorTabs.map((tab) => (
+                      <button
+                        className={inspectorTab === tab.id ? "inspector-tab active" : "inspector-tab"}
+                        key={tab.id}
+                        onClick={() => setInspectorTab(tab.id)}
+                        role="tab"
+                        type="button"
+                      >
+                        {tab.label}
+                      </button>
+                    ))}
+                  </div>
+
+              <section className="panel project-toolbar" hidden={inspectorTab !== "export"}>
                 <div className="panel-heading">
                   <FileText size={18} />
                   <h2>Project script</h2>
@@ -765,13 +799,13 @@ export function PitchWorkbench() {
                 </div>
               </section>
 
-              <section className="panel">
+              <section className="panel" hidden={inspectorTab !== "style" && inspectorTab !== "voice"}>
                 <div className="panel-heading">
                   <Timer size={18} />
                   <h2>Timing, voice, and deck style</h2>
                 </div>
                 <div className="settings-grid">
-                  <label className="field compact-field">
+                  <label className="field compact-field" hidden={inspectorTab !== "style"}>
                     <span>Target duration</span>
                     <input
                       type="number"
@@ -782,7 +816,7 @@ export function PitchWorkbench() {
                       onChange={(event) => scaleVideoDuration(Number(event.target.value))}
                     />
                   </label>
-                  <label className="field compact-field">
+                  <label className="field compact-field" hidden={inspectorTab !== "voice"}>
                     <span>Voice</span>
                     <select
                       value={result.pitch.voiceSettings?.voiceName || "Kore"}
@@ -795,7 +829,7 @@ export function PitchWorkbench() {
                       ))}
                     </select>
                   </label>
-                  <label className="field compact-field">
+                  <label className="field compact-field" hidden={inspectorTab !== "voice"}>
                     <span>Tone</span>
                     <select
                       value={result.pitch.voiceSettings?.tone || "warm"}
@@ -807,7 +841,7 @@ export function PitchWorkbench() {
                       <option value="executive">executive</option>
                     </select>
                   </label>
-                  <label className="field compact-field">
+                  <label className="field compact-field" hidden={inspectorTab !== "voice"}>
                     <span>Pacing</span>
                     <select
                       value={result.pitch.voiceSettings?.pacing || "measured"}
@@ -818,7 +852,7 @@ export function PitchWorkbench() {
                       <option value="brisk">brisk</option>
                     </select>
                   </label>
-                  <label className="field compact-field">
+                  <label className="field compact-field" hidden={inspectorTab !== "style"}>
                     <span>Theme</span>
                     <select
                       value={result.pitch.deckStyle?.theme || "graphite"}
@@ -831,7 +865,7 @@ export function PitchWorkbench() {
                       ))}
                     </select>
                   </label>
-                  <label className="field compact-field">
+                  <label className="field compact-field" hidden={inspectorTab !== "style"}>
                     <span>Deck density</span>
                     <select
                       value={result.pitch.deckStyle?.density || "balanced"}
@@ -844,7 +878,7 @@ export function PitchWorkbench() {
                       ))}
                     </select>
                   </label>
-                  <label className="field compact-field">
+                  <label className="field compact-field" hidden={inspectorTab !== "style"}>
                     <span>Demo caption</span>
                     <select
                       value={result.pitch.deckStyle?.captionStyle || "bar"}
@@ -857,11 +891,11 @@ export function PitchWorkbench() {
                       ))}
                     </select>
                   </label>
-                  <label className="field compact-field">
+                  <label className="field compact-field" hidden={inspectorTab !== "style"}>
                     <span>Accent</span>
                     <input type="color" value={result.pitch.deckStyle?.primaryColor || "#2563eb"} onChange={(event) => updateDeckStyle({ primaryColor: event.target.value })} />
                   </label>
-                  <label className="toggle-field">
+                  <label className="toggle-field" hidden={inspectorTab !== "style"}>
                     <input
                       type="checkbox"
                       checked={result.pitch.deckStyle?.showGrid ?? true}
@@ -872,7 +906,7 @@ export function PitchWorkbench() {
                 </div>
               </section>
 
-              <section className="panel">
+              <section className="panel" hidden={inspectorTab !== "media"}>
                 <div className="panel-heading">
                   <ImagePlus size={18} />
                   <h2>Demo footage</h2>
@@ -900,7 +934,7 @@ export function PitchWorkbench() {
                 </div>
               </section>
 
-              <section className="panel">
+              <section className="panel" hidden={inspectorTab !== "media"}>
                 <div className="panel-heading">
                   <Camera size={18} />
                   <h2>Demo capture</h2>
@@ -970,7 +1004,7 @@ export function PitchWorkbench() {
                 </div>
               </section>
 
-              <section className="output-grid">
+              <section className="output-grid" hidden>
                 <section className="panel">
                   <div className="panel-heading">
                     <FileText size={18} />
@@ -1011,12 +1045,12 @@ export function PitchWorkbench() {
                 </section>
               </section>
 
-              <section className="output-grid">
+              <section className="output-grid" hidden>
                 <FeatureList title="Core functions" items={result.pitch.productReport.coreFunctions} />
                 <FeatureList title="Supporting functions" items={result.pitch.productReport.supportingFunctions} />
               </section>
 
-              <section className="panel">
+              <section className="panel" hidden>
                 <div className="panel-heading">
                   <Sparkles size={18} />
                   <h2>Agent logs</h2>
@@ -1038,7 +1072,7 @@ export function PitchWorkbench() {
                 </div>
               </section>
 
-              <section className="panel">
+              <section className="panel" hidden={inspectorTab !== "script"}>
                 <div className="panel-heading">
                   <FileText size={18} />
                   <h2>Scene script editor</h2>
@@ -1120,6 +1154,41 @@ export function PitchWorkbench() {
                                 onChange={(event) => updateScene(scene.id, { trimEnd: event.target.value === "" ? undefined : Number(event.target.value) })}
                               />
                             </label>
+                            <label className="field compact-field">
+                              <span>Camera</span>
+                              <select value={scene.cameraPlan?.mode || "wide"} onChange={(event) => updateScene(scene.id, { cameraPlan: { ...scene.cameraPlan, mode: event.target.value as NonNullable<PitchScene["cameraPlan"]>["mode"] } })}>
+                                <option value="wide">wide</option>
+                                <option value="focus">focus</option>
+                                <option value="follow">follow</option>
+                                <option value="manual">manual</option>
+                              </select>
+                            </label>
+                            <label className="field compact-field">
+                              <span>Focus target</span>
+                              <input
+                                value={scene.cameraPlan?.focusLabel || scene.visualIntent?.targetHint || ""}
+                                onChange={(event) => updateScene(scene.id, { cameraPlan: { ...scene.cameraPlan, focusLabel: event.target.value, mode: scene.cameraPlan?.mode || "focus" } })}
+                                placeholder="input block, model selector"
+                              />
+                            </label>
+                            <div className="camera-grid wide">
+                              <label className="field compact-field">
+                                <span>Crop X</span>
+                                <input type="number" min="0" max="1" step="0.01" value={scene.cameraPlan?.crop?.x ?? 0} onChange={(event) => updateScene(scene.id, { cameraPlan: updateCameraCrop(scene, { x: Number(event.target.value) }) })} />
+                              </label>
+                              <label className="field compact-field">
+                                <span>Crop Y</span>
+                                <input type="number" min="0" max="1" step="0.01" value={scene.cameraPlan?.crop?.y ?? 0} onChange={(event) => updateScene(scene.id, { cameraPlan: updateCameraCrop(scene, { y: Number(event.target.value) }) })} />
+                              </label>
+                              <label className="field compact-field">
+                                <span>Crop W</span>
+                                <input type="number" min="0.18" max="1" step="0.01" value={scene.cameraPlan?.crop?.width ?? 1} onChange={(event) => updateScene(scene.id, { cameraPlan: updateCameraCrop(scene, { width: Number(event.target.value) }) })} />
+                              </label>
+                              <label className="field compact-field">
+                                <span>Crop H</span>
+                                <input type="number" min="0.18" max="1" step="0.01" value={scene.cameraPlan?.crop?.height ?? 1} onChange={(event) => updateScene(scene.id, { cameraPlan: updateCameraCrop(scene, { height: Number(event.target.value) }) })} />
+                              </label>
+                            </div>
                           </>
                         ) : null}
                         <label className="field compact-field wide">
@@ -1139,6 +1208,10 @@ export function PitchWorkbench() {
                   ))}
                 </div>
               </section>
+                </aside>
+              </section>
+
+              <RunDetails result={result} />
             </>
           ) : (
             <section className="empty-state">
@@ -1178,6 +1251,20 @@ function getMediaAssetById(assets: ProjectMediaAsset[] | undefined, assetId?: st
 
 function shouldScenePatchInvalidateAudio(patch: Partial<PitchScene>) {
   return Boolean(patch.title !== undefined || patch.beat !== undefined || patch.narration !== undefined || patch.onScreenText !== undefined || patch.duration !== undefined);
+}
+
+function updateCameraCrop(scene: PitchScene, cropPatch: Partial<NonNullable<NonNullable<PitchScene["cameraPlan"]>["crop"]>>): NonNullable<PitchScene["cameraPlan"]> {
+  return {
+    ...scene.cameraPlan,
+    mode: scene.cameraPlan?.mode === "wide" ? "focus" : scene.cameraPlan?.mode || "focus",
+    crop: {
+      x: scene.cameraPlan?.crop?.x ?? 0,
+      y: scene.cameraPlan?.crop?.y ?? 0,
+      width: scene.cameraPlan?.crop?.width ?? 1,
+      height: scene.cameraPlan?.crop?.height ?? 1,
+      ...cropPatch,
+    },
+  };
 }
 
 async function readFileAsDataUrl(file: File) {
@@ -1253,6 +1340,138 @@ function FeatureList({ title, items }: { title: string; items: Array<{ name: str
         ))}
       </ul>
     </section>
+  );
+}
+
+function GenerationProgress({
+  stage,
+  isGenerating,
+  elapsedSeconds,
+  message,
+  liveLogs,
+  result,
+}: {
+  stage: GenerationStage;
+  isGenerating: boolean;
+  elapsedSeconds: number;
+  message: string;
+  liveLogs: AgentLog[];
+  result: PitchResponse | null;
+}) {
+  const activeIndex = generationSteps.findIndex((step) => step.id === stage);
+  const safeActiveIndex = activeIndex === -1 ? (result ? generationSteps.length - 1 : 0) : activeIndex;
+
+  return (
+    <div className="generation-progress">
+      <div className="live-run-head">
+        <span>{isGenerating ? message || generationLabel(stage) : result ? "Ready to edit and export." : "Waiting for a repository."}</span>
+        <strong>{isGenerating ? formatDuration(elapsedSeconds) : `${liveLogs.length || result?.agentLogs.length || 0} logs`}</strong>
+      </div>
+      <ol className="stage-steps">
+        {generationSteps.map((step, index) => {
+          const status = stage === "error" ? (index <= safeActiveIndex ? "error" : "waiting") : index < safeActiveIndex || (!isGenerating && result && step.id === "ready") ? "done" : index === safeActiveIndex && isGenerating ? "running" : index === safeActiveIndex && result ? "done" : "waiting";
+          return (
+            <li className={`stage-step ${status}`} key={step.id}>
+              <span>{status === "running" ? <Loader2 size={13} className="spin" /> : status === "done" ? <CheckCircle2 size={13} /> : null}</span>
+              <strong>{step.label}</strong>
+            </li>
+          );
+        })}
+      </ol>
+    </div>
+  );
+}
+
+function RunDetails({ result }: { result: PitchResponse }) {
+  return (
+    <details className="run-details">
+      <summary>
+        <span>Run details</span>
+        <small>Report, transcript, capture evidence, partner stack, and logs</small>
+      </summary>
+      <div className="run-details-grid">
+        <section className="panel">
+          <div className="panel-heading">
+            <FileText size={18} />
+            <h2>Product report</h2>
+          </div>
+          <div className="report-block">
+            <h3>User need</h3>
+            <p>{result.pitch.productReport.userNeed}</p>
+          </div>
+          <div className="report-block">
+            <h3>Product shape</h3>
+            <p>{result.pitch.productReport.productShape}</p>
+          </div>
+          <div className="report-block">
+            <h3>Why this flow works</h3>
+            <p>{result.pitch.productReport.whyThisFlowWorks}</p>
+          </div>
+        </section>
+
+        <section className="panel">
+          <div className="panel-heading">
+            <Mic2 size={18} />
+            <h2>Transcript</h2>
+          </div>
+          <p className="transcript">{result.pitch.narration}</p>
+          {result.voiceQa ? (
+            <div className="voice-qa">
+              <div>
+                <span className={`small-status ${captureStatusClass(result.voiceQa.status)}`}>{result.voiceQa.status}</span>
+                <strong>Speechmatics voice QA</strong>
+              </div>
+              <p>{result.voiceQa.message}</p>
+            </div>
+          ) : null}
+        </section>
+
+        <FeatureList title="Core functions" items={result.pitch.productReport.coreFunctions} />
+        <FeatureList title="Supporting functions" items={result.pitch.productReport.supportingFunctions} />
+
+        <section className="panel">
+          <div className="panel-heading">
+            <Code2 size={18} />
+            <h2>Partner stack</h2>
+          </div>
+          <ul className="stack-list">
+            {result.pitch.partnerStack.map((partner) => (
+              <li key={partner.name}>
+                <span className={`small-status ${partner.status}`}>{partner.status}</span>
+                <div>
+                  <strong>{partner.name}</strong>
+                  <p>{partner.role}</p>
+                  <small>{partner.detail}</small>
+                </div>
+              </li>
+            ))}
+          </ul>
+        </section>
+
+        <section className="panel">
+          <div className="panel-heading">
+            <Sparkles size={18} />
+            <h2>Agent logs</h2>
+          </div>
+          <LiveAgentRun logs={result.agentLogs} message="Completed agent run." elapsedSeconds={0} />
+          <div className="agent-grid compact-agent-grid">
+            {result.agentLogs.map((log) => (
+              <article className="agent-panel" key={log.agent}>
+                <header>
+                  <strong>{log.agent}</strong>
+                  <span>{log.model || log.provider}</span>
+                </header>
+                <ul>
+                  {log.entries.map((entry, entryIndex) => (
+                    <LogEntry entry={entry} key={`${log.agent}-${entry.step}-${entryIndex}`} />
+                  ))}
+                </ul>
+              </article>
+            ))}
+          </div>
+        </section>
+      </div>
+    </details>
   );
 }
 
@@ -1518,6 +1737,16 @@ function syncExportVideo(
 function pickRecordingMimeType() {
   const candidates = ["video/webm;codecs=vp9,opus", "video/webm;codecs=vp8,opus", "video/webm"];
   return candidates.find((candidate) => MediaRecorder.isTypeSupported(candidate)) ?? "";
+}
+
+function generationLabel(stage: GenerationStage) {
+  if (stage === "understanding") return "Generating pitch";
+  if (stage === "capturing") return "Capturing demo";
+  if (stage === "aligning") return "Aligning script";
+  if (stage === "preparing") return "Preparing preview";
+  if (stage === "ready") return "Ready to edit/export";
+  if (stage === "error") return "Needs attention";
+  return "Ready";
 }
 
 function formatTime(value: number) {

@@ -1,7 +1,18 @@
 import { normalizeDeckStyle } from "@/lib/project-settings";
-import type { DeckStyle, PitchPlan, PitchScene, VisualMode } from "@/lib/types";
+import { normalizeCameraPlan } from "@/lib/semantic-director";
+import type { CameraCrop, CameraPlan, DeckStyle, PitchPlan, PitchScene, VisualMode } from "@/lib/types";
 
-type FrameColors = { primary: string; secondary: string; accent: string; bgStart: string; bgMid: string; ink: string; muted: string };
+type FrameColors = {
+  primary: string;
+  secondary: string;
+  accent: string;
+  bgStart: string;
+  bgMid: string;
+  ink: string;
+  muted: string;
+  panel: string;
+  panelStroke: string;
+};
 
 const palette: Record<VisualMode, { primary: string; secondary: string; accent: string }> = {
   presenter: { primary: "#2563eb", secondary: "#101827", accent: "#dbeafe" },
@@ -68,7 +79,7 @@ export function drawPitchFrame(
 
   ctx.clearRect(0, 0, width, height);
   if (captureImage && isDemoScene(scene)) {
-    drawFullscreenDemo(ctx, scene, width, height, captureImage, deckStyle);
+    drawFullscreenDemo(ctx, scene, sceneProgress, width, height, captureImage, deckStyle, colors);
     return;
   }
 
@@ -82,12 +93,17 @@ export function drawPitchFrame(
 function drawFullscreenDemo(
   ctx: CanvasRenderingContext2D,
   scene: PitchScene,
+  progress: number,
   width: number,
   height: number,
   captureImage: CanvasImageSource,
   deckStyle: DeckStyle,
+  colors: FrameColors,
 ) {
-  drawImageCover(ctx, captureImage, 0, 0, width, height);
+  const cameraPlan = normalizeCameraPlan(scene.cameraPlan, scene);
+  const crop = animatedCameraCrop(cameraPlan, progress);
+  drawImageCropCover(ctx, captureImage, crop, 0, 0, width, height);
+  drawCameraVignette(ctx, width, height, cameraPlan, colors);
   if (deckStyle.captionStyle === "none") return;
 
   ctx.font = "650 20px Geist, Arial, sans-serif";
@@ -148,9 +164,11 @@ function drawBackground(
 }
 
 function drawHeader(ctx: CanvasRenderingContext2D, plan: PitchPlan, time: number, total: number, width: number, colors: FrameColors) {
-  ctx.fillStyle = "rgba(8,9,8,0.72)";
+  ctx.fillStyle = colors.panel;
   roundRect(ctx, 42, 34, width - 84, 58, 8);
   ctx.fill();
+  ctx.strokeStyle = colors.panelStroke;
+  ctx.stroke();
 
   ctx.fillStyle = colors.ink;
   ctx.font = "700 25px Geist, Arial, sans-serif";
@@ -176,17 +194,23 @@ function drawVisual(
   colors: { primary: string; accent: string; secondary: string },
   captureImage?: CanvasImageSource,
 ) {
-  const left = 68;
+  const left = width - Math.min(520, width * 0.42) - 68;
   const top = 136;
   const boxWidth = Math.min(520, width * 0.42);
   const boxHeight = height - 246;
 
-  ctx.fillStyle = "rgba(8,9,8,0.62)";
-  ctx.strokeStyle = "rgba(255,255,255,0.1)";
+  ctx.fillStyle = "rgba(255,255,255,0.08)";
+  ctx.strokeStyle = "rgba(255,255,255,0.15)";
   ctx.lineWidth = 2;
   roundRect(ctx, left, top, boxWidth, boxHeight, 8);
   ctx.fill();
   ctx.stroke();
+
+  ctx.fillStyle = colors.primary;
+  ctx.globalAlpha = 0.12;
+  roundRect(ctx, left + 20, top + 20, boxWidth - 40, boxHeight - 40, 8);
+  ctx.fill();
+  ctx.globalAlpha = 1;
 
   if (captureImage && ["product", "workflow", "evidence"].includes(scene.visual)) {
     drawCapturedProduct(ctx, left, top, boxWidth, boxHeight, colors, captureImage);
@@ -409,18 +433,18 @@ function drawCopy(
   colors: FrameColors,
   deckStyle: DeckStyle,
 ) {
-  const x = Math.min(660, width * 0.52);
-  const maxWidth = width - x - 68;
+  const x = 68;
+  const maxWidth = Math.min(570, width * 0.45);
   const y = 154;
-  const headlineSize = deckStyle.density === "bold" ? 66 : deckStyle.density === "compact" ? 48 : 58;
-  const beatSize = deckStyle.density === "compact" ? 20 : 23;
+  const headlineSize = deckStyle.density === "bold" ? 70 : deckStyle.density === "compact" ? 50 : 60;
+  const beatSize = deckStyle.density === "compact" ? 20 : 24;
 
   ctx.fillStyle = colors.primary;
   ctx.font = "700 18px Geist Mono, monospace";
   ctx.fillText(scene.title.toUpperCase(), x, y);
 
   ctx.fillStyle = colors.ink;
-  ctx.font = `800 ${headlineSize}px Geist, Arial, sans-serif`;
+  ctx.font = `850 ${headlineSize}px Geist, Arial, sans-serif`;
   const titleLines = wrapText(ctx, scene.onScreenText, maxWidth, 3);
   titleLines.forEach((line, index) => ctx.fillText(line, x, y + 74 + index * (headlineSize + 4)));
 
@@ -429,10 +453,10 @@ function drawCopy(
   const beatLines = wrapText(ctx, scene.beat, maxWidth, 4);
   beatLines.forEach((line, index) => ctx.fillText(line, x, y + 286 + index * 34));
 
-  ctx.fillStyle = "rgba(8,9,8,0.58)";
+  ctx.fillStyle = colors.panel;
   roundRect(ctx, x, height - 166, maxWidth, 88, 8);
   ctx.fill();
-  ctx.strokeStyle = "rgba(255,255,255,0.11)";
+  ctx.strokeStyle = colors.panelStroke;
   ctx.stroke();
 
   ctx.fillStyle = colors.accent;
@@ -561,6 +585,70 @@ function drawImageCover(
   ctx.restore();
 }
 
+function drawImageCropCover(
+  ctx: CanvasRenderingContext2D,
+  image: CanvasImageSource,
+  crop: CameraCrop,
+  x: number,
+  y: number,
+  width: number,
+  height: number,
+) {
+  const sourceWidth = Number("naturalWidth" in image ? image.naturalWidth : "videoWidth" in image ? image.videoWidth : width) || width;
+  const sourceHeight = Number("naturalHeight" in image ? image.naturalHeight : "videoHeight" in image ? image.videoHeight : height) || height;
+  const cropX = crop.x * sourceWidth;
+  const cropY = crop.y * sourceHeight;
+  const cropWidth = crop.width * sourceWidth;
+  const cropHeight = crop.height * sourceHeight;
+  const targetAspect = width / height;
+  const cropAspect = cropWidth / cropHeight;
+  let sx = cropX;
+  let sy = cropY;
+  let sw = cropWidth;
+  let sh = cropHeight;
+
+  if (cropAspect > targetAspect) {
+    sw = cropHeight * targetAspect;
+    sx = cropX + (cropWidth - sw) / 2;
+  } else {
+    sh = cropWidth / targetAspect;
+    sy = cropY + (cropHeight - sh) / 2;
+  }
+
+  ctx.drawImage(image, sx, sy, sw, sh, x, y, width, height);
+}
+
+function animatedCameraCrop(cameraPlan: CameraPlan, progress: number): CameraCrop {
+  const target = cameraPlan.crop || { x: 0, y: 0, width: 1, height: 1 };
+  if (cameraPlan.mode === "wide") return { x: 0, y: 0, width: 1, height: 1 };
+  const blend = cameraPlan.easing === "linear" ? Math.min(1, progress / 0.28) : easeOutCubic(Math.min(1, progress / 0.34));
+  return {
+    x: lerp(0, target.x, blend),
+    y: lerp(0, target.y, blend),
+    width: lerp(1, target.width, blend),
+    height: lerp(1, target.height, blend),
+  };
+}
+
+function drawCameraVignette(ctx: CanvasRenderingContext2D, width: number, height: number, cameraPlan: CameraPlan, colors: FrameColors) {
+  const gradient = ctx.createRadialGradient(width / 2, height / 2, width * 0.18, width / 2, height / 2, width * 0.72);
+  gradient.addColorStop(0, "rgba(0,0,0,0)");
+  gradient.addColorStop(1, "rgba(0,0,0,0.24)");
+  ctx.fillStyle = gradient;
+  ctx.fillRect(0, 0, width, height);
+
+  if (cameraPlan.mode === "wide" || !cameraPlan.focusLabel) return;
+  ctx.fillStyle = "rgba(15,23,42,0.66)";
+  roundRect(ctx, 48, 42, 260, 42, 8);
+  ctx.fill();
+  ctx.strokeStyle = colors.primary;
+  ctx.lineWidth = 2;
+  ctx.stroke();
+  ctx.fillStyle = "#f8fafc";
+  ctx.font = "700 15px Geist Mono, monospace";
+  fitText(ctx, cameraPlan.focusLabel.toUpperCase(), 66, 69, 222);
+}
+
 function wrapText(ctx: CanvasRenderingContext2D, text: string, maxWidth: number, maxLines: number) {
   const words = text.split(/\s+/).filter(Boolean);
   const lines: string[] = [];
@@ -594,6 +682,14 @@ function measure(ctx: CanvasRenderingContext2D, text: string) {
   return ctx.measureText(text).width;
 }
 
+function lerp(from: number, to: number, progress: number) {
+  return from + (to - from) * progress;
+}
+
+function easeOutCubic(value: number) {
+  return 1 - Math.pow(1 - value, 3);
+}
+
 function themedColors(base: { primary: string; secondary: string; accent: string }, deckStyle: DeckStyle): FrameColors {
   const primary = deckStyle.primaryColor || base.primary;
   if (deckStyle.theme === "paper") {
@@ -605,6 +701,8 @@ function themedColors(base: { primary: string; secondary: string; accent: string
       bgMid: "#eef3f8",
       ink: "#111827",
       muted: "#475569",
+      panel: "rgba(255,255,255,0.78)",
+      panelStroke: "rgba(15,23,42,0.12)",
     };
   }
   if (deckStyle.theme === "studio") {
@@ -616,6 +714,8 @@ function themedColors(base: { primary: string; secondary: string; accent: string
       bgMid: "#1f2937",
       ink: "#f8fafc",
       muted: "#cbd5e1",
+      panel: "rgba(2,6,23,0.56)",
+      panelStroke: "rgba(255,255,255,0.12)",
     };
   }
   if (deckStyle.theme === "midnight") {
@@ -627,6 +727,8 @@ function themedColors(base: { primary: string; secondary: string; accent: string
       bgMid: "#0f172a",
       ink: "#f8fafc",
       muted: "#b6c2d2",
+      panel: "rgba(2,6,23,0.62)",
+      panelStroke: "rgba(191,219,254,0.14)",
     };
   }
   return {
@@ -637,5 +739,7 @@ function themedColors(base: { primary: string; secondary: string; accent: string
     bgMid: "#111512",
     ink: "#f1f3ed",
     muted: "#aab3a8",
+    panel: "rgba(8,9,8,0.64)",
+    panelStroke: "rgba(255,255,255,0.12)",
   };
 }

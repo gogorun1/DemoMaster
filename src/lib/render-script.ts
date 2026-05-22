@@ -13,6 +13,8 @@ export interface RenderScene {
   mediaAssetId?: string;
   trimStart?: number;
   trimEnd?: number;
+  visualIntent?: PitchPlan["scenes"][number]["visualIntent"];
+  cameraPlan?: PitchPlan["scenes"][number]["cameraPlan"];
 }
 
 export interface RenderScript {
@@ -53,6 +55,8 @@ export function buildRenderScript(plan: PitchPlan, capture?: DemoCaptureResult):
       mediaAssetId: scene.mediaAssetId,
       trimStart: scene.trimStart,
       trimEnd: scene.trimEnd,
+      visualIntent: scene.visualIntent,
+      cameraPlan: scene.cameraPlan,
     })),
   };
 }

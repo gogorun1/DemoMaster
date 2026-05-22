@@ -289,6 +289,18 @@ a {
   gap: 18px;
 }
 
+.editor-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(340px, 400px);
+  gap: 18px;
+  align-items: start;
+}
+
+.preview-column,
+.inspector-panel {
+  min-width: 0;
+}
+
 .stage {
   padding: 16px;
 }
@@ -393,6 +405,80 @@ a {
 
 .project-notice {
   margin-top: 12px;
+}
+
+.scene-strip {
+  display: grid;
+  grid-template-columns: auto minmax(110px, 0.3fr) minmax(0, 1fr);
+  gap: 12px;
+  align-items: center;
+  margin-top: 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
+  box-shadow: var(--shadow);
+  padding: 12px 14px;
+}
+
+.scene-strip strong {
+  font-size: 13px;
+}
+
+.scene-strip p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.4;
+}
+
+.inspector-panel {
+  position: sticky;
+  top: 16px;
+  display: grid;
+  gap: 12px;
+  max-height: calc(100vh - 48px);
+  overflow: auto;
+}
+
+.inspector-tabs {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 4px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
+  box-shadow: var(--shadow);
+  padding: 5px;
+}
+
+.inspector-tab {
+  min-height: 34px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.inspector-tab.active {
+  background: var(--ink);
+  color: #ffffff;
+}
+
+.inspector-panel .panel {
+  box-shadow: none;
+}
+
+.inspector-panel .settings-grid,
+.inspector-panel .media-controls,
+.camera-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.camera-grid {
+  display: grid;
+  gap: 12px;
 }
 
 .output-grid {
@@ -616,6 +702,11 @@ a {
   gap: 12px;
 }
 
+.generation-progress {
+  display: grid;
+  gap: 12px;
+}
+
 .live-run-head {
   display: flex;
   align-items: flex-start;
@@ -632,6 +723,54 @@ a {
   flex: 0 0 auto;
   font-family: "Geist Mono", "Geist Mono Fallback", ui-monospace, monospace;
   font-size: 12px;
+}
+
+.stage-steps {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.stage-step {
+  display: grid;
+  grid-template-columns: 20px minmax(0, 1fr);
+  gap: 8px;
+  align-items: center;
+  min-height: 30px;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 750;
+}
+
+.stage-step span {
+  display: grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 999px;
+  background: var(--surface-2);
+}
+
+.stage-step.done span {
+  background: #ecfdf5;
+  color: var(--green);
+}
+
+.stage-step.running span {
+  background: #eff6ff;
+  color: var(--blue);
+}
+
+.stage-step.error span {
+  background: #fef2f2;
+  color: var(--red);
+}
+
+.stage-step.done,
+.stage-step.running {
+  color: var(--ink);
 }
 
 .progress-list {
@@ -723,6 +862,44 @@ a {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 12px;
+}
+
+.compact-agent-grid {
+  margin-top: 14px;
+}
+
+.run-details {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
+  box-shadow: var(--shadow);
+}
+
+.run-details summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 56px;
+  padding: 0 16px;
+  cursor: pointer;
+}
+
+.run-details summary span {
+  font-weight: 800;
+}
+
+.run-details summary small {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.run-details-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+  border-top: 1px solid var(--line);
+  padding: 14px;
 }
 
 .capture-layout {
@@ -941,8 +1118,10 @@ a {
 
 @media (max-width: 1120px) {
   .workspace,
+  .editor-grid,
   .output-grid,
   .agent-grid,
+  .run-details-grid,
   .capture-layout,
   .scene-editor-grid,
   .settings-grid,
