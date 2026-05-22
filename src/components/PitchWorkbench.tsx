@@ -149,6 +149,7 @@ export function PitchWorkbench() {
   const [redoStack, setRedoStack] = useState<EditorSnapshot[]>([]);
   const [error, setError] = useState("");
   const [exportUrl, setExportUrl] = useState("");
+  const [mediaUrl, setMediaUrl] = useState("");
   const audioRef = useRef<HTMLAudioElement>(null);
   const projectInputRef = useRef<HTMLInputElement>(null);
   const mediaInputRef = useRef<HTMLInputElement>(null);
@@ -449,6 +450,50 @@ export function PitchWorkbench() {
     }
   }
 
+  async function importMediaAssetUrl() {
+    if (!result) return;
+    const url = mediaUrl.trim();
+    if (!url) return;
+
+    try {
+      setError("");
+      const response = await fetch("/api/media/import", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ url }),
+      });
+      const body = (await response.json()) as {
+        type?: ProjectMediaAsset["type"];
+        name?: string;
+        mimeType?: string;
+        dataUrl?: string;
+        error?: string;
+      };
+      if (!response.ok || !body.type || !body.dataUrl || !body.mimeType || !body.name) {
+        throw new Error(body.error || "Could not import media URL.");
+      }
+      const asset: ProjectMediaAsset = {
+        id: crypto.randomUUID?.() || `${Date.now()}-${Math.random().toString(16).slice(2)}`,
+        type: body.type,
+        name: body.name,
+        mimeType: body.mimeType,
+        dataUrl: body.dataUrl,
+        createdAt: new Date().toISOString(),
+      };
+      updatePitch(
+        {
+          ...result.pitch,
+          mediaAssets: [...(result.pitch.mediaAssets || []), asset],
+          activeMediaAssetId: asset.id,
+        },
+        { audioStale: isAudioStale },
+      );
+      setMediaUrl("");
+    } catch (mediaError) {
+      setError(mediaError instanceof Error ? mediaError.message : "Could not import media URL.");
+    }
+  }
+
   function setActiveMediaAsset(assetId: string) {
     if (!result) return;
     updatePitch(
@@ -651,12 +696,12 @@ export function PitchWorkbench() {
         <aside className="sidebar">
           <form className="repo-form" onSubmit={handleSubmit}>
             <label className="field">
-              <span>Repository</span>
+              <span>Repository or app URL</span>
               <input
                 data-demomaster-repo-input
                 value={repoUrl}
                 onChange={(event) => setRepoUrl(event.target.value)}
-                placeholder="https://github.com/org/repo"
+                placeholder="https://github.com/org/repo or https://app.example.com"
                 spellCheck={false}
               />
             </label>
@@ -918,6 +963,16 @@ export function PitchWorkbench() {
                       Upload footage
                     </button>
                     <input ref={mediaInputRef} type="file" accept="video/*,image/*" onChange={importMediaAsset} hidden />
+                  </div>
+                  <div className="url-import-row">
+                    <label className="field compact-field">
+                      <span>Media URL</span>
+                      <input value={mediaUrl} onChange={(event) => setMediaUrl(event.target.value)} placeholder="https://..." />
+                    </label>
+                    <button className="btn" type="button" onClick={importMediaAssetUrl} disabled={!mediaUrl.trim()}>
+                      <ExternalLink size={17} />
+                      Add URL
+                    </button>
                   </div>
                   <label className="field compact-field">
                     <span>Active footage</span>
@@ -1217,8 +1272,8 @@ export function PitchWorkbench() {
             <section className="empty-state">
               <div>
                 <Code2 size={42} />
-                <h2>Repo in. Pitch video out.</h2>
-                <p>One repository URL starts the full agent run: understanding, positioning, scripting, judging, narration, and export.</p>
+                <h2>URL in. Pitch video out.</h2>
+                <p>Use a GitHub repository or live app URL to start the full agent run: understanding, positioning, scripting, capture, narration, and export.</p>
               </div>
             </section>
           )}
