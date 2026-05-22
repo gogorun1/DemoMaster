@@ -27,15 +27,14 @@ import {
 import { VideoCanvas } from "@/components/VideoCanvas";
 import { ensureCaptureManifest } from "@/lib/capture-manifest";
 import { applyProjectEditOperation, normalizePitchTimeline } from "@/lib/project-edits";
-import { captionStyles, deckDensities, deckThemes, normalizeDeckStyle, normalizePitchSettings, normalizeVoiceSettings, voicePresets } from "@/lib/project-settings";
-import { drawPitchFrame, getSceneAtTime, getSceneMediaPlaybackTime, getTotalDuration, isDemoScene } from "@/lib/render-frame";
+import { captionStyles, normalizeDeckStyle, normalizePitchSettings, normalizeVoiceSettings, voicePresets } from "@/lib/project-settings";
+import { drawPitchFrame, getPresentationMediaTime, getSceneAtTime, getTotalDuration, isDemoScene, shouldPlayPresentationMedia } from "@/lib/render-frame";
 import { buildRenderScript } from "@/lib/render-script";
-import type { AgentLog, AgentLogEntry, AgentName, DemoCaptureManifest, DemoCaptureResult, PitchResponse, PitchScene, ProjectMediaAsset, VisualMode } from "@/lib/types";
+import type { AgentLog, AgentLogEntry, AgentName, DemoCaptureManifest, DemoCaptureResult, PitchResponse, PitchScene, ProjectMediaAsset } from "@/lib/types";
 
 const sampleRepo = "https://github.com/vercel/ai-chatbot";
 const projectSchema = "demomaster.project";
 const projectVersion = 1;
-const visualModes: VisualMode[] = ["presenter", "problem", "product", "workflow", "evidence", "close"];
 type GenerationStage = "idle" | "understanding" | "capturing" | "aligning" | "preparing" | "ready" | "error";
 type InspectorTab = "script" | "media" | "style" | "voice" | "export";
 
@@ -838,7 +837,7 @@ export function PitchWorkbench() {
               <section className="panel" hidden={inspectorTab !== "style" && inspectorTab !== "voice"}>
                 <div className="panel-heading">
                   <Timer size={18} />
-                  <h2>Timing, voice, and deck style</h2>
+                  <h2>{inspectorTab === "voice" ? "Voice" : "Timing and captions"}</h2>
                 </div>
                 <div className="settings-grid">
                   <label className="field compact-field" hidden={inspectorTab !== "style"}>
@@ -889,32 +888,6 @@ export function PitchWorkbench() {
                     </select>
                   </label>
                   <label className="field compact-field" hidden={inspectorTab !== "style"}>
-                    <span>Theme</span>
-                    <select
-                      value={result.pitch.deckStyle?.theme || "graphite"}
-                      onChange={(event) => updateDeckStyle({ theme: event.target.value as NonNullable<PitchResponse["pitch"]["deckStyle"]>["theme"] })}
-                    >
-                      {deckThemes.map((theme) => (
-                        <option value={theme} key={theme}>
-                          {theme}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                  <label className="field compact-field" hidden={inspectorTab !== "style"}>
-                    <span>Deck density</span>
-                    <select
-                      value={result.pitch.deckStyle?.density || "balanced"}
-                      onChange={(event) => updateDeckStyle({ density: event.target.value as NonNullable<PitchResponse["pitch"]["deckStyle"]>["density"] })}
-                    >
-                      {deckDensities.map((density) => (
-                        <option value={density} key={density}>
-                          {density}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                  <label className="field compact-field" hidden={inspectorTab !== "style"}>
                     <span>Demo caption</span>
                     <select
                       value={result.pitch.deckStyle?.captionStyle || "bar"}
@@ -930,14 +903,6 @@ export function PitchWorkbench() {
                   <label className="field compact-field" hidden={inspectorTab !== "style"}>
                     <span>Accent</span>
                     <input type="color" value={result.pitch.deckStyle?.primaryColor || "#2563eb"} onChange={(event) => updateDeckStyle({ primaryColor: event.target.value })} />
-                  </label>
-                  <label className="toggle-field" hidden={inspectorTab !== "style"}>
-                    <input
-                      type="checkbox"
-                      checked={result.pitch.deckStyle?.showGrid ?? true}
-                      onChange={(event) => updateDeckStyle({ showGrid: event.target.checked })}
-                    />
-                    <span>Grid</span>
                   </label>
                 </div>
               </section>
@@ -1121,29 +1086,19 @@ export function PitchWorkbench() {
               <section className="panel" hidden={inspectorTab !== "script"}>
                 <div className="panel-heading">
                   <FileText size={18} />
-                  <h2>Scene script editor</h2>
+                  <h2>Script editor</h2>
                 </div>
                 <div className="scene-editor-list">
                   {result.pitch.scenes.map((scene) => (
                     <article className="scene-editor-item" key={scene.id}>
                       <header>
                         <span className="scene-time">{formatTime(scene.start)}</span>
-                        <strong>{scene.id}</strong>
+                        <strong>{scene.title || scene.id}</strong>
                       </header>
                       <div className="scene-editor-grid">
                         <label className="field compact-field">
                           <span>Title</span>
                           <input value={scene.title} onChange={(event) => updateScene(scene.id, { title: event.target.value })} />
-                        </label>
-                        <label className="field compact-field">
-                          <span>Visual</span>
-                          <select value={scene.visual} onChange={(event) => updateScene(scene.id, { visual: event.target.value as VisualMode })}>
-                            {visualModes.map((mode) => (
-                              <option value={mode} key={mode}>
-                                {mode}
-                              </option>
-                            ))}
-                          </select>
                         </label>
                         <label className="field compact-field">
                           <span>Duration</span>
@@ -1156,99 +1111,94 @@ export function PitchWorkbench() {
                             onChange={(event) => updateScene(scene.id, { duration: Number(event.target.value) })}
                           />
                         </label>
-                        {isDemoScene(scene) ? (
-                          <>
-                            <label className="field compact-field">
-                              <span>Segment</span>
-                              <select value={scene.sourceSegmentId || ""} onChange={(event) => updateScene(scene.id, { sourceSegmentId: event.target.value || undefined })}>
-                                <option value="">Auto</option>
-                                {(result.capture?.manifest?.segments || []).map((segment) => (
-                                  <option value={segment.id} key={segment.id}>
-                                    {segment.label}
-                                  </option>
-                                ))}
-                              </select>
-                            </label>
-                            <label className="field compact-field">
-                              <span>Media</span>
-                              <select value={scene.mediaAssetId || ""} onChange={(event) => updateScene(scene.id, { mediaAssetId: event.target.value || undefined })}>
-                                <option value="">Active/default</option>
-                                {(result.pitch.mediaAssets || []).map((asset) => (
-                                  <option value={asset.id} key={asset.id}>
-                                    {asset.name}
-                                  </option>
-                                ))}
-                              </select>
-                            </label>
-                            <label className="field compact-field">
-                              <span>Trim start</span>
-                              <input
-                                type="number"
-                                min="0"
-                                step="0.1"
-                                value={scene.trimStart ?? ""}
-                                onChange={(event) => updateScene(scene.id, { trimStart: event.target.value === "" ? undefined : Number(event.target.value) })}
-                              />
-                            </label>
-                            <label className="field compact-field">
-                              <span>Trim end</span>
-                              <input
-                                type="number"
-                                min="0"
-                                step="0.1"
-                                value={scene.trimEnd ?? ""}
-                                onChange={(event) => updateScene(scene.id, { trimEnd: event.target.value === "" ? undefined : Number(event.target.value) })}
-                              />
-                            </label>
-                            <label className="field compact-field">
-                              <span>Camera</span>
-                              <select value={scene.cameraPlan?.mode || "wide"} onChange={(event) => updateScene(scene.id, { cameraPlan: { ...scene.cameraPlan, mode: event.target.value as NonNullable<PitchScene["cameraPlan"]>["mode"] } })}>
-                                <option value="wide">wide</option>
-                                <option value="focus">focus</option>
-                                <option value="follow">follow</option>
-                                <option value="manual">manual</option>
-                              </select>
-                            </label>
-                            <label className="field compact-field">
-                              <span>Focus target</span>
-                              <input
-                                value={scene.cameraPlan?.focusLabel || scene.visualIntent?.targetHint || ""}
-                                onChange={(event) => updateScene(scene.id, { cameraPlan: { ...scene.cameraPlan, focusLabel: event.target.value, mode: scene.cameraPlan?.mode || "focus" } })}
-                                placeholder="input block, model selector"
-                              />
-                            </label>
-                            <div className="camera-grid wide">
-                              <label className="field compact-field">
-                                <span>Crop X</span>
-                                <input type="number" min="0" max="1" step="0.01" value={scene.cameraPlan?.crop?.x ?? 0} onChange={(event) => updateScene(scene.id, { cameraPlan: updateCameraCrop(scene, { x: Number(event.target.value) }) })} />
-                              </label>
-                              <label className="field compact-field">
-                                <span>Crop Y</span>
-                                <input type="number" min="0" max="1" step="0.01" value={scene.cameraPlan?.crop?.y ?? 0} onChange={(event) => updateScene(scene.id, { cameraPlan: updateCameraCrop(scene, { y: Number(event.target.value) }) })} />
-                              </label>
-                              <label className="field compact-field">
-                                <span>Crop W</span>
-                                <input type="number" min="0.18" max="1" step="0.01" value={scene.cameraPlan?.crop?.width ?? 1} onChange={(event) => updateScene(scene.id, { cameraPlan: updateCameraCrop(scene, { width: Number(event.target.value) }) })} />
-                              </label>
-                              <label className="field compact-field">
-                                <span>Crop H</span>
-                                <input type="number" min="0.18" max="1" step="0.01" value={scene.cameraPlan?.crop?.height ?? 1} onChange={(event) => updateScene(scene.id, { cameraPlan: updateCameraCrop(scene, { height: Number(event.target.value) }) })} />
-                              </label>
-                            </div>
-                          </>
-                        ) : null}
-                        <label className="field compact-field wide">
-                          <span>On-screen text</span>
-                          <input value={scene.onScreenText} onChange={(event) => updateScene(scene.id, { onScreenText: event.target.value })} />
-                        </label>
-                        <label className="field compact-field wide">
-                          <span>Beat</span>
-                          <textarea value={scene.beat} onChange={(event) => updateScene(scene.id, { beat: event.target.value })} rows={2} />
-                        </label>
                         <label className="field compact-field wide">
                           <span>Narration</span>
                           <textarea value={scene.narration} onChange={(event) => updateScene(scene.id, { narration: event.target.value })} rows={3} />
                         </label>
+                        {isDemoScene(scene) ? (
+                          <details className="camera-details wide">
+                            <summary>Camera and clip</summary>
+                            <div className="camera-details-grid">
+                              <label className="field compact-field">
+                                <span>Segment</span>
+                                <select value={scene.sourceSegmentId || ""} onChange={(event) => updateScene(scene.id, { sourceSegmentId: event.target.value || undefined })}>
+                                  <option value="">Auto</option>
+                                  {(result.capture?.manifest?.segments || []).map((segment) => (
+                                    <option value={segment.id} key={segment.id}>
+                                      {segment.label}
+                                    </option>
+                                  ))}
+                                </select>
+                              </label>
+                              <label className="field compact-field">
+                                <span>Media</span>
+                                <select value={scene.mediaAssetId || ""} onChange={(event) => updateScene(scene.id, { mediaAssetId: event.target.value || undefined })}>
+                                  <option value="">Active/default</option>
+                                  {(result.pitch.mediaAssets || []).map((asset) => (
+                                    <option value={asset.id} key={asset.id}>
+                                      {asset.name}
+                                    </option>
+                                  ))}
+                                </select>
+                              </label>
+                              <label className="field compact-field">
+                                <span>Trim start</span>
+                                <input
+                                  type="number"
+                                  min="0"
+                                  step="0.1"
+                                  value={scene.trimStart ?? ""}
+                                  onChange={(event) => updateScene(scene.id, { trimStart: event.target.value === "" ? undefined : Number(event.target.value) })}
+                                />
+                              </label>
+                              <label className="field compact-field">
+                                <span>Trim end</span>
+                                <input
+                                  type="number"
+                                  min="0"
+                                  step="0.1"
+                                  value={scene.trimEnd ?? ""}
+                                  onChange={(event) => updateScene(scene.id, { trimEnd: event.target.value === "" ? undefined : Number(event.target.value) })}
+                                />
+                              </label>
+                              <label className="field compact-field">
+                                <span>Camera</span>
+                                <select value={scene.cameraPlan?.mode || "wide"} onChange={(event) => updateScene(scene.id, { cameraPlan: { ...scene.cameraPlan, mode: event.target.value as NonNullable<PitchScene["cameraPlan"]>["mode"] } })}>
+                                  <option value="wide">wide</option>
+                                  <option value="focus">focus</option>
+                                  <option value="follow">follow</option>
+                                  <option value="manual">manual</option>
+                                </select>
+                              </label>
+                              <label className="field compact-field">
+                                <span>Focus target</span>
+                                <input
+                                  value={scene.cameraPlan?.focusLabel || scene.visualIntent?.targetHint || ""}
+                                  onChange={(event) => updateScene(scene.id, { cameraPlan: { ...scene.cameraPlan, focusLabel: event.target.value, mode: scene.cameraPlan?.mode || "focus" } })}
+                                  placeholder="input block, model selector"
+                                />
+                              </label>
+                              <div className="camera-grid wide">
+                                <label className="field compact-field">
+                                  <span>Crop X</span>
+                                  <input type="number" min="0" max="1" step="0.01" value={scene.cameraPlan?.crop?.x ?? 0} onChange={(event) => updateScene(scene.id, { cameraPlan: updateCameraCrop(scene, { x: Number(event.target.value) }) })} />
+                                </label>
+                                <label className="field compact-field">
+                                  <span>Crop Y</span>
+                                  <input type="number" min="0" max="1" step="0.01" value={scene.cameraPlan?.crop?.y ?? 0} onChange={(event) => updateScene(scene.id, { cameraPlan: updateCameraCrop(scene, { y: Number(event.target.value) }) })} />
+                                </label>
+                                <label className="field compact-field">
+                                  <span>Crop W</span>
+                                  <input type="number" min="0.18" max="1" step="0.01" value={scene.cameraPlan?.crop?.width ?? 1} onChange={(event) => updateScene(scene.id, { cameraPlan: updateCameraCrop(scene, { width: Number(event.target.value) }) })} />
+                                </label>
+                                <label className="field compact-field">
+                                  <span>Crop H</span>
+                                  <input type="number" min="0.18" max="1" step="0.01" value={scene.cameraPlan?.crop?.height ?? 1} onChange={(event) => updateScene(scene.id, { cameraPlan: updateCameraCrop(scene, { height: Number(event.target.value) }) })} />
+                                </label>
+                              </div>
+                            </div>
+                          </details>
+                        ) : null}
                       </div>
                     </article>
                   ))}
@@ -1756,22 +1706,26 @@ function syncExportVideo(
   playbackState: { active: boolean; lastTime: number; sceneId?: string },
 ) {
   const scene = getSceneAtTime(plan, currentTime);
-  if (!isDemoScene(scene)) {
+  const shouldPlay = shouldPlayPresentationMedia(plan, currentTime);
+  const hasDuration = Number.isFinite(video.duration) && video.duration > 0;
+  const targetTime = hasDuration ? getPresentationMediaTime(plan, currentTime, video.duration) : 0;
+
+  if (!shouldPlay) {
     video.pause();
     playbackState.active = false;
     playbackState.sceneId = undefined;
     playbackState.lastTime = currentTime;
-    if (Number.isFinite(video.duration) && video.duration > 0 && video.currentTime > 0.1) video.currentTime = 0;
+    if (hasDuration && Math.abs(video.currentTime - targetTime) > 0.08) video.currentTime = targetTime;
     return;
   }
 
-  if (Number.isFinite(video.duration) && video.duration > 0) {
+  if (hasDuration) {
     const trimStart = Math.min(Math.max(0, scene.trimStart ?? 0), Math.max(0, video.duration - 0.05));
     const trimEnd = scene.trimEnd !== undefined && scene.trimEnd > trimStart ? Math.min(scene.trimEnd, video.duration) : video.duration;
     const mediaSpan = Math.max(1, trimEnd - trimStart);
     video.playbackRate = Math.max(0.1, Math.min(2, mediaSpan / Math.max(1, scene.duration)));
     if (!playbackState.active || playbackState.sceneId !== scene.id || currentTime < playbackState.lastTime) {
-      video.currentTime = getSceneMediaPlaybackTime(plan, currentTime, video.duration);
+      video.currentTime = targetTime;
       playbackState.active = true;
       playbackState.sceneId = scene.id;
     }
