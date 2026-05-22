@@ -50,10 +50,15 @@ Acceptance checks:
 
 Goal: make every edit an explicit operation on the project script.
 
+Delivered:
+
+- Added deterministic project edit operations for scene updates and scene moves.
+- Routed scene editor changes through the operation layer instead of direct ad hoc state mutation.
+- Added undo and redo history for script edits.
+
 Planned:
 
-- Add edit operations such as scene move, trim, rewrite narration, set overlay, and replace capture segment.
-- Add undo/redo history.
+- Add edit operations such as trim, rewrite narration, set overlay, and replace capture segment.
 - Add a command box that converts natural-language edit requests into structured operations.
 - Apply operations locally first, then optionally ask an AI editor to propose patches.
 
