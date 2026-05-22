@@ -108,6 +108,7 @@ function drawFootageFrame(
   const crop = isDemoScene(scene) ? animatedCameraCrop(plan, scene, cameraPlan, progress) : { x: 0, y: 0, width: 1, height: 1 };
   drawImageCropCover(ctx, captureImage, crop, 0, 0, width, height);
   drawCameraVignette(ctx, width, height, cameraPlan, colors);
+  drawSceneAnnotations(ctx, scene, progress, width, height, cameraPlan, colors);
   if (deckStyle.captionStyle === "none") return;
 
   ctx.font = "650 20px Geist, Arial, sans-serif";
@@ -128,6 +129,55 @@ function drawFootageFrame(
   ctx.shadowBlur = 8;
   narration.forEach((line, index) => ctx.fillText(line, panelX + 24, panelY + 34 + index * 27));
   ctx.shadowBlur = 0;
+}
+
+function drawSceneAnnotations(
+  ctx: CanvasRenderingContext2D,
+  scene: PitchScene,
+  progress: number,
+  width: number,
+  height: number,
+  cameraPlan: CameraPlan,
+  colors: FrameColors,
+) {
+  const localTime = progress * Math.max(0.1, scene.duration);
+  const annotation = scene.annotations?.find((item) => localTime >= item.start && localTime <= item.end);
+  if (!annotation) return;
+
+  const label = annotation.label || cameraPlan.focusLabel || "Focus";
+  ctx.save();
+  ctx.font = "760 14px Geist Mono, monospace";
+  const labelWidth = Math.min(width - 120, Math.max(168, ctx.measureText(label.toUpperCase()).width + 40));
+  const labelX = width - labelWidth - 48;
+  const labelY = 42;
+  ctx.fillStyle = "rgba(255,255,255,0.9)";
+  roundRect(ctx, labelX, labelY, labelWidth, 42, 8);
+  ctx.fill();
+  ctx.strokeStyle = colors.primary;
+  ctx.lineWidth = 2;
+  ctx.stroke();
+  ctx.fillStyle = "#111827";
+  fitText(ctx, label.toUpperCase(), labelX + 18, labelY + 27, labelWidth - 36);
+
+  if (annotation.type !== "label") {
+    const pulse = 0.72 + Math.sin(progress * Math.PI * 8) * 0.12;
+    const frameWidth = cameraPlan.mode === "wide" ? width * 0.48 : width * 0.62;
+    const frameHeight = cameraPlan.mode === "wide" ? height * 0.28 : height * 0.38;
+    const frameX = (width - frameWidth) / 2;
+    const frameY = cameraPlan.mode === "wide" ? height * 0.34 : height * 0.26;
+    ctx.strokeStyle = hexToRgba(colors.primary, pulse);
+    ctx.lineWidth = annotation.type === "click" ? 5 : 3;
+    roundRect(ctx, frameX, frameY, frameWidth, frameHeight, 14);
+    ctx.stroke();
+    if (annotation.type === "click") {
+      ctx.fillStyle = hexToRgba(colors.primary, 0.22);
+      ctx.beginPath();
+      ctx.arc(frameX + frameWidth * 0.5, frameY + frameHeight * 0.5, 28 + 10 * pulse, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  }
+
+  ctx.restore();
 }
 
 function drawFootagePlaceholder(ctx: CanvasRenderingContext2D, scene: PitchScene, width: number, height: number, colors: FrameColors) {
@@ -290,6 +340,14 @@ function lerp(from: number, to: number, progress: number) {
 function smoothstep(value: number) {
   const t = Math.min(1, Math.max(0, value));
   return t * t * (3 - 2 * t);
+}
+
+function hexToRgba(hex: string, alpha: number) {
+  const normalized = /^#[0-9a-f]{6}$/i.test(hex) ? hex : "#2563eb";
+  const red = Number.parseInt(normalized.slice(1, 3), 16);
+  const green = Number.parseInt(normalized.slice(3, 5), 16);
+  const blue = Number.parseInt(normalized.slice(5, 7), 16);
+  return `rgba(${red},${green},${blue},${Math.min(1, Math.max(0, alpha))})`;
 }
 
 function themedColors(base: { primary: string; secondary: string; accent: string }, deckStyle: DeckStyle): FrameColors {

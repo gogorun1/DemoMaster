@@ -26,6 +26,14 @@ export interface VisualIntent {
   confidence?: number;
 }
 
+export interface DemoAnnotation {
+  type: "highlight" | "label" | "click";
+  label: string;
+  start: number;
+  end: number;
+  targetLabel?: string;
+}
+
 export interface VoiceSettings {
   voiceName: string;
   tone: "clear" | "warm" | "energetic" | "executive";
@@ -189,6 +197,7 @@ export interface PitchScene {
   trimEnd?: number;
   visualIntent?: VisualIntent;
   cameraPlan?: CameraPlan;
+  annotations?: DemoAnnotation[];
 }
 
 export interface PitchPlan {
