@@ -1,4 +1,7 @@
-import type { PitchPlan, PitchScene, VisualMode } from "@/lib/types";
+import { normalizeDeckStyle } from "@/lib/project-settings";
+import type { DeckStyle, PitchPlan, PitchScene, VisualMode } from "@/lib/types";
+
+type FrameColors = { primary: string; secondary: string; accent: string; bgStart: string; bgMid: string; ink: string; muted: string };
 
 const palette: Record<VisualMode, { primary: string; secondary: string; accent: string }> = {
   presenter: { primary: "#2563eb", secondary: "#101827", accent: "#dbeafe" },
@@ -26,13 +29,28 @@ export function isDemoScene(scene: PitchScene) {
 
 export function getDemoPlaybackTime(plan: PitchPlan, time: number, mediaDuration: number) {
   if (!Number.isFinite(mediaDuration) || mediaDuration <= 0) return 0;
+  const maxMediaTime = Math.max(0, mediaDuration - 0.05);
   const demoScenes = plan.scenes.filter(isDemoScene);
   if (!demoScenes.length) return 0;
   const start = demoScenes[0].start;
   const lastScene = demoScenes[demoScenes.length - 1];
   const end = lastScene.start + lastScene.duration;
   const progress = Math.min(1, Math.max(0, (time - start) / Math.max(1, end - start)));
-  return Math.min(mediaDuration - 0.05, Math.max(0, progress * mediaDuration));
+  return Math.min(maxMediaTime, Math.max(0, progress * mediaDuration));
+}
+
+export function getSceneMediaPlaybackTime(plan: PitchPlan, time: number, mediaDuration: number) {
+  const scene = getSceneAtTime(plan, time);
+  if (!isDemoScene(scene)) return 0;
+  if (!Number.isFinite(mediaDuration) || mediaDuration <= 0) return 0;
+  const maxMediaTime = Math.max(0, mediaDuration - 0.05);
+  const trimStart = Math.min(Math.max(0, scene.trimStart ?? 0), maxMediaTime);
+  const trimEnd =
+    scene.trimEnd !== undefined && scene.trimEnd > trimStart
+      ? Math.min(scene.trimEnd, mediaDuration)
+      : mediaDuration;
+  const localProgress = Math.min(1, Math.max(0, (time - scene.start) / Math.max(1, scene.duration)));
+  return Math.min(maxMediaTime, Math.max(0, trimStart + (trimEnd - trimStart) * localProgress));
 }
 
 export function drawPitchFrame(
@@ -45,18 +63,19 @@ export function drawPitchFrame(
   const scene = getSceneAtTime(plan, time);
   const total = getTotalDuration(plan);
   const sceneProgress = Math.min(1, Math.max(0, (time - scene.start) / scene.duration));
-  const colors = palette[scene.visual] ?? palette.workflow;
+  const deckStyle = normalizeDeckStyle(plan.deckStyle);
+  const colors = themedColors(palette[scene.visual] ?? palette.workflow, deckStyle);
 
   ctx.clearRect(0, 0, width, height);
   if (captureImage && isDemoScene(scene)) {
-    drawFullscreenDemo(ctx, scene, width, height, captureImage);
+    drawFullscreenDemo(ctx, scene, width, height, captureImage, deckStyle);
     return;
   }
 
-  drawBackground(ctx, width, height, colors);
-  drawHeader(ctx, plan, time, total, width);
+  drawBackground(ctx, width, height, colors, deckStyle);
+  drawHeader(ctx, plan, time, total, width, colors);
   drawVisual(ctx, scene, sceneProgress, width, height, colors, captureImage);
-  drawCopy(ctx, plan, scene, sceneProgress, width, height, colors);
+  drawCopy(ctx, plan, scene, sceneProgress, width, height, colors, deckStyle);
   drawTimeline(ctx, plan, time, width, height);
 }
 
@@ -66,15 +85,20 @@ function drawFullscreenDemo(
   width: number,
   height: number,
   captureImage: CanvasImageSource,
+  deckStyle: DeckStyle,
 ) {
   drawImageCover(ctx, captureImage, 0, 0, width, height);
+  if (deckStyle.captionStyle === "none") return;
 
   ctx.font = "650 20px Geist, Arial, sans-serif";
   const narration = wrapText(ctx, scene.narration, width - 160, 2);
   const panelHeight = narration.length > 1 ? 82 : 54;
-  const panelY = height - panelHeight - 28;
+  const isPill = deckStyle.captionStyle === "pill";
+  const panelY = height - panelHeight - (isPill ? 42 : 28);
+  const panelX = isPill ? 86 : 56;
+  const panelW = width - panelX * 2;
   ctx.fillStyle = "rgba(15,23,42,0.76)";
-  roundRect(ctx, 56, panelY, width - 112, panelHeight, 8);
+  roundRect(ctx, panelX, panelY, panelW, panelHeight, isPill ? 999 : 8);
   ctx.fill();
   ctx.strokeStyle = "rgba(255,255,255,0.16)";
   ctx.stroke();
@@ -82,7 +106,7 @@ function drawFullscreenDemo(
   ctx.fillStyle = "#f8fafc";
   ctx.shadowColor = "rgba(0,0,0,0.45)";
   ctx.shadowBlur = 8;
-  narration.forEach((line, index) => ctx.fillText(line, 80, panelY + 34 + index * 27));
+  narration.forEach((line, index) => ctx.fillText(line, panelX + 24, panelY + 34 + index * 27));
   ctx.shadowBlur = 0;
 }
 
@@ -90,28 +114,31 @@ function drawBackground(
   ctx: CanvasRenderingContext2D,
   width: number,
   height: number,
-  colors: { primary: string; secondary: string },
+  colors: FrameColors,
+  deckStyle: DeckStyle,
 ) {
   const gradient = ctx.createLinearGradient(0, 0, width, height);
-  gradient.addColorStop(0, "#070807");
-  gradient.addColorStop(0.48, "#111512");
+  gradient.addColorStop(0, colors.bgStart);
+  gradient.addColorStop(0.48, colors.bgMid);
   gradient.addColorStop(1, colors.secondary);
   ctx.fillStyle = gradient;
   ctx.fillRect(0, 0, width, height);
 
-  ctx.strokeStyle = "rgba(255,255,255,0.055)";
-  ctx.lineWidth = 1;
-  for (let x = 0; x < width; x += 64) {
-    ctx.beginPath();
-    ctx.moveTo(x, 0);
-    ctx.lineTo(x, height);
-    ctx.stroke();
-  }
-  for (let y = 0; y < height; y += 64) {
-    ctx.beginPath();
-    ctx.moveTo(0, y);
-    ctx.lineTo(width, y);
-    ctx.stroke();
+  if (deckStyle.showGrid) {
+    ctx.strokeStyle = deckStyle.theme === "paper" ? "rgba(15,23,42,0.08)" : "rgba(255,255,255,0.055)";
+    ctx.lineWidth = 1;
+    for (let x = 0; x < width; x += 64) {
+      ctx.beginPath();
+      ctx.moveTo(x, 0);
+      ctx.lineTo(x, height);
+      ctx.stroke();
+    }
+    for (let y = 0; y < height; y += 64) {
+      ctx.beginPath();
+      ctx.moveTo(0, y);
+      ctx.lineTo(width, y);
+      ctx.stroke();
+    }
   }
 
   ctx.fillStyle = colors.primary;
@@ -120,21 +147,21 @@ function drawBackground(
   ctx.globalAlpha = 1;
 }
 
-function drawHeader(ctx: CanvasRenderingContext2D, plan: PitchPlan, time: number, total: number, width: number) {
+function drawHeader(ctx: CanvasRenderingContext2D, plan: PitchPlan, time: number, total: number, width: number, colors: FrameColors) {
   ctx.fillStyle = "rgba(8,9,8,0.72)";
   roundRect(ctx, 42, 34, width - 84, 58, 8);
   ctx.fill();
 
-  ctx.fillStyle = "#f1f3ed";
+  ctx.fillStyle = colors.ink;
   ctx.font = "700 25px Geist, Arial, sans-serif";
   ctx.fillText(plan.productName, 68, 70);
 
-  ctx.fillStyle = "#aab3a8";
+  ctx.fillStyle = colors.muted;
   ctx.font = "500 17px Geist, Arial, sans-serif";
   fitText(ctx, plan.tagline, 68 + measure(ctx, plan.productName) + 24, 70, width - 360);
 
   ctx.font = "600 16px Geist Mono, monospace";
-  ctx.fillStyle = "#83d17d";
+  ctx.fillStyle = colors.primary;
   ctx.textAlign = "right";
   ctx.fillText(`${Math.round(Math.min(time, total))}s / ${Math.round(total)}s`, width - 68, 70);
   ctx.textAlign = "left";
@@ -379,23 +406,26 @@ function drawCopy(
   progress: number,
   width: number,
   height: number,
-  colors: { primary: string; accent: string },
+  colors: FrameColors,
+  deckStyle: DeckStyle,
 ) {
   const x = Math.min(660, width * 0.52);
   const maxWidth = width - x - 68;
   const y = 154;
+  const headlineSize = deckStyle.density === "bold" ? 66 : deckStyle.density === "compact" ? 48 : 58;
+  const beatSize = deckStyle.density === "compact" ? 20 : 23;
 
   ctx.fillStyle = colors.primary;
   ctx.font = "700 18px Geist Mono, monospace";
   ctx.fillText(scene.title.toUpperCase(), x, y);
 
-  ctx.fillStyle = "#f1f3ed";
-  ctx.font = "800 58px Geist, Arial, sans-serif";
+  ctx.fillStyle = colors.ink;
+  ctx.font = `800 ${headlineSize}px Geist, Arial, sans-serif`;
   const titleLines = wrapText(ctx, scene.onScreenText, maxWidth, 3);
-  titleLines.forEach((line, index) => ctx.fillText(line, x, y + 74 + index * 62));
+  titleLines.forEach((line, index) => ctx.fillText(line, x, y + 74 + index * (headlineSize + 4)));
 
-  ctx.fillStyle = "#cbd3c6";
-  ctx.font = "500 23px Geist, Arial, sans-serif";
+  ctx.fillStyle = colors.muted;
+  ctx.font = `500 ${beatSize}px Geist, Arial, sans-serif`;
   const beatLines = wrapText(ctx, scene.beat, maxWidth, 4);
   beatLines.forEach((line, index) => ctx.fillText(line, x, y + 286 + index * 34));
 
@@ -414,7 +444,7 @@ function drawCopy(
   roundRect(ctx, x, height - 52, maxWidth * progress, 6, 3);
   ctx.fill();
 
-  ctx.fillStyle = "#aab3a8";
+  ctx.fillStyle = colors.muted;
   ctx.font = "600 15px Geist Mono, monospace";
   ctx.fillText(plan.primaryUser, x, height - 28);
 }
@@ -562,4 +592,50 @@ function fitText(ctx: CanvasRenderingContext2D, text: string, x: number, y: numb
 
 function measure(ctx: CanvasRenderingContext2D, text: string) {
   return ctx.measureText(text).width;
+}
+
+function themedColors(base: { primary: string; secondary: string; accent: string }, deckStyle: DeckStyle): FrameColors {
+  const primary = deckStyle.primaryColor || base.primary;
+  if (deckStyle.theme === "paper") {
+    return {
+      primary,
+      secondary: "#e7ecf2",
+      accent: "#1f2937",
+      bgStart: "#f8fafc",
+      bgMid: "#eef3f8",
+      ink: "#111827",
+      muted: "#475569",
+    };
+  }
+  if (deckStyle.theme === "studio") {
+    return {
+      primary,
+      secondary: "#121826",
+      accent: base.accent,
+      bgStart: "#111827",
+      bgMid: "#1f2937",
+      ink: "#f8fafc",
+      muted: "#cbd5e1",
+    };
+  }
+  if (deckStyle.theme === "midnight") {
+    return {
+      primary,
+      secondary: "#08111f",
+      accent: "#bfdbfe",
+      bgStart: "#020617",
+      bgMid: "#0f172a",
+      ink: "#f8fafc",
+      muted: "#b6c2d2",
+    };
+  }
+  return {
+    primary,
+    secondary: base.secondary,
+    accent: base.accent,
+    bgStart: "#070807",
+    bgMid: "#111512",
+    ink: "#f1f3ed",
+    muted: "#aab3a8",
+  };
 }

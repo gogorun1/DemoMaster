@@ -72,10 +72,17 @@ Acceptance checks:
 
 Goal: support user-owned demo footage and more precise composition.
 
+Delivered:
+
+- Added project-level target duration controls that proportionally retime scenes.
+- Added configurable Gemini voice preset, tone, and pacing settings.
+- Added configurable deck theme, density, accent color, grid, and demo caption style.
+- Added uploaded image/video media assets that can replace captured demo footage in preview, export, and project JSON.
+- Added per-demo-scene capture segment mapping plus clip trim start/end controls.
+- Added a renderer-neutral `RenderScript` abstraction so the current canvas renderer has a migration path toward Remotion or another production renderer.
+
 Planned:
 
-- Allow uploaded video or screenshot assets.
-- Allow assigning source segments to timeline scenes.
 - Add fit, crop, zoom, captions, and basic overlay controls.
 - Evaluate moving the renderer from direct canvas drawing to a Remotion composition while keeping the project script as the source of truth.
 

@@ -9,6 +9,7 @@ import {
   Download,
   ExternalLink,
   FileText,
+  ImagePlus,
   Loader2,
   Mic2,
   Pause,
@@ -17,6 +18,7 @@ import {
   RefreshCcw,
   Save,
   Sparkles,
+  Timer,
   Trophy,
   Undo2,
   Upload,
@@ -25,8 +27,10 @@ import {
 import { VideoCanvas } from "@/components/VideoCanvas";
 import { ensureCaptureManifest } from "@/lib/capture-manifest";
 import { applyProjectEditOperation, normalizePitchTimeline } from "@/lib/project-edits";
-import { drawPitchFrame, getDemoPlaybackTime, getSceneAtTime, getTotalDuration, isDemoScene } from "@/lib/render-frame";
-import type { AgentLog, AgentLogEntry, AgentName, DemoCaptureManifest, DemoCaptureResult, PitchResponse, PitchScene, VisualMode } from "@/lib/types";
+import { captionStyles, deckDensities, deckThemes, normalizeDeckStyle, normalizePitchSettings, normalizeVoiceSettings, voicePresets } from "@/lib/project-settings";
+import { drawPitchFrame, getSceneAtTime, getSceneMediaPlaybackTime, getTotalDuration, isDemoScene } from "@/lib/render-frame";
+import { buildRenderScript } from "@/lib/render-script";
+import type { AgentLog, AgentLogEntry, AgentName, DemoCaptureManifest, DemoCaptureResult, PitchResponse, PitchScene, ProjectMediaAsset, VisualMode } from "@/lib/types";
 
 const sampleRepo = "https://github.com/vercel/ai-chatbot";
 const projectSchema = "demomaster.project";
@@ -97,6 +101,18 @@ interface EditorSnapshot {
   isAudioStale: boolean;
 }
 
+type LoadedMedia = HTMLImageElement | HTMLVideoElement;
+
+interface ExportMediaSet {
+  defaultMedia?: LoadedMedia;
+  assets: Map<string, LoadedMedia>;
+}
+
+interface ExportMediaSelection {
+  key: string;
+  media?: LoadedMedia;
+}
+
 export function PitchWorkbench() {
   const [repoUrl, setRepoUrl] = useState(sampleRepo);
   const [result, setResult] = useState<PitchResponse | null>(null);
@@ -115,8 +131,10 @@ export function PitchWorkbench() {
   const [exportUrl, setExportUrl] = useState("");
   const audioRef = useRef<HTMLAudioElement>(null);
   const projectInputRef = useRef<HTMLInputElement>(null);
+  const mediaInputRef = useRef<HTMLInputElement>(null);
 
   const totalDuration = useMemo(() => (result ? getTotalDuration(result.pitch) : 0), [result]);
+  const activeMediaAsset = useMemo(() => getActiveMediaAsset(result, currentTime), [currentTime, result]);
 
   useEffect(() => {
     document.documentElement.dataset.demomasterHydrated = "true";
@@ -307,23 +325,111 @@ export function PitchWorkbench() {
 
   function updateScene(sceneId: string, patch: Partial<PitchScene>) {
     if (!result) return;
-    commitEditableResult({
-      ...result,
-      pitch: applyProjectEditOperation(result.pitch, {
-        type: "update-scene",
-        sceneId,
-        patch,
-      }),
-    });
+    commitEditableResult(
+      {
+        ...result,
+        pitch: applyProjectEditOperation(result.pitch, {
+          type: "update-scene",
+          sceneId,
+          patch,
+        }),
+      },
+      { audioStale: shouldScenePatchInvalidateAudio(patch) },
+    );
   }
 
-  function commitEditableResult(nextResult: PitchResponse) {
+  function commitEditableResult(nextResult: PitchResponse, options: { audioStale?: boolean } = {}) {
     if (!result) return;
     setUndoStack((stack) => [...stack.slice(-19), { result, isAudioStale }]);
     setRedoStack([]);
     setResult(normalizePitchResult(nextResult));
-    setIsAudioStale(true);
+    setIsAudioStale(options.audioStale ?? true);
     setExportUrl("");
+  }
+
+  function updatePitch(pitch: PitchResponse["pitch"], options: { audioStale?: boolean } = {}) {
+    if (!result) return;
+    commitEditableResult({ ...result, pitch }, options);
+  }
+
+  function scaleVideoDuration(targetDuration: number) {
+    if (!result) return;
+    updatePitch(
+      applyProjectEditOperation(result.pitch, {
+        type: "scale-duration",
+        targetDuration,
+      }),
+      { audioStale: true },
+    );
+  }
+
+  function updateVoiceSetting(patch: Partial<NonNullable<PitchResponse["pitch"]["voiceSettings"]>>) {
+    if (!result) return;
+    updatePitch(
+      {
+        ...result.pitch,
+        voiceSettings: normalizeVoiceSettings({
+          ...result.pitch.voiceSettings,
+          ...patch,
+        }),
+      },
+      { audioStale: true },
+    );
+  }
+
+  function updateDeckStyle(patch: Partial<NonNullable<PitchResponse["pitch"]["deckStyle"]>>) {
+    if (!result) return;
+    updatePitch(
+      {
+        ...result.pitch,
+        deckStyle: normalizeDeckStyle({
+          ...result.pitch.deckStyle,
+          ...patch,
+        }),
+      },
+      { audioStale: isAudioStale },
+    );
+  }
+
+  async function importMediaAsset(event: ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (!file || !result) return;
+
+    try {
+      const dataUrl = await readFileAsDataUrl(file);
+      const type = file.type.startsWith("video/") ? "video" : file.type.startsWith("image/") ? "image" : undefined;
+      if (!type) throw new Error("Upload a video or image file.");
+      const asset: ProjectMediaAsset = {
+        id: crypto.randomUUID?.() || `${Date.now()}-${Math.random().toString(16).slice(2)}`,
+        type,
+        name: file.name,
+        mimeType: file.type,
+        dataUrl,
+        createdAt: new Date().toISOString(),
+      };
+      updatePitch(
+        {
+          ...result.pitch,
+          mediaAssets: [...(result.pitch.mediaAssets || []), asset],
+          activeMediaAssetId: asset.id,
+        },
+        { audioStale: isAudioStale },
+      );
+    } catch (mediaError) {
+      setError(mediaError instanceof Error ? mediaError.message : "Could not import media asset.");
+    }
+  }
+
+  function setActiveMediaAsset(assetId: string) {
+    if (!result) return;
+    updatePitch(
+      {
+        ...result.pitch,
+        activeMediaAssetId: assetId || undefined,
+      },
+      { audioStale: isAudioStale },
+    );
   }
 
   function undoEdit() {
@@ -396,6 +502,7 @@ export function PitchWorkbench() {
       version: projectVersion,
       exportedAt: new Date().toISOString(),
       result: normalizePitchResult(result),
+      renderScript: buildRenderScript(result.pitch, result.capture),
     };
     const blob = new Blob([JSON.stringify(project, null, 2)], { type: "application/json" });
     const url = URL.createObjectURL(blob);
@@ -469,8 +576,8 @@ export function PitchWorkbench() {
 
       recorder.start();
       source?.start();
-      const captureMedia = await loadCaptureMedia(result.capture);
-      await drawExportFrames(context, result, totalDuration, captureMedia);
+      const exportMedia = await loadExportMediaSet(result.capture, result.pitch);
+      await drawExportFrames(context, result, totalDuration, exportMedia);
       source?.stop();
       recorder.stop();
 
@@ -591,7 +698,7 @@ export function PitchWorkbench() {
                 </div>
 
                 <div className="canvas-wrap">
-                  <VideoCanvas plan={result.pitch} currentTime={currentTime} capture={result.capture} />
+                  <VideoCanvas plan={result.pitch} currentTime={currentTime} capture={result.capture} mediaAsset={activeMediaAsset} />
                 </div>
 
                 <div className="stage-controls">
@@ -655,6 +762,141 @@ export function PitchWorkbench() {
                     Redo
                   </button>
                   <input ref={projectInputRef} type="file" accept="application/json,.json" onChange={importProject} hidden />
+                </div>
+              </section>
+
+              <section className="panel">
+                <div className="panel-heading">
+                  <Timer size={18} />
+                  <h2>Timing, voice, and deck style</h2>
+                </div>
+                <div className="settings-grid">
+                  <label className="field compact-field">
+                    <span>Target duration</span>
+                    <input
+                      type="number"
+                      min="5"
+                      max="180"
+                      step="1"
+                      value={Math.round(result.pitch.targetDuration || totalDuration)}
+                      onChange={(event) => scaleVideoDuration(Number(event.target.value))}
+                    />
+                  </label>
+                  <label className="field compact-field">
+                    <span>Voice</span>
+                    <select
+                      value={result.pitch.voiceSettings?.voiceName || "Kore"}
+                      onChange={(event) => updateVoiceSetting({ voiceName: event.target.value })}
+                    >
+                      {voicePresets.map((voice) => (
+                        <option value={voice} key={voice}>
+                          {voice}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <label className="field compact-field">
+                    <span>Tone</span>
+                    <select
+                      value={result.pitch.voiceSettings?.tone || "warm"}
+                      onChange={(event) => updateVoiceSetting({ tone: event.target.value as NonNullable<PitchResponse["pitch"]["voiceSettings"]>["tone"] })}
+                    >
+                      <option value="warm">warm</option>
+                      <option value="clear">clear</option>
+                      <option value="energetic">energetic</option>
+                      <option value="executive">executive</option>
+                    </select>
+                  </label>
+                  <label className="field compact-field">
+                    <span>Pacing</span>
+                    <select
+                      value={result.pitch.voiceSettings?.pacing || "measured"}
+                      onChange={(event) => updateVoiceSetting({ pacing: event.target.value as NonNullable<PitchResponse["pitch"]["voiceSettings"]>["pacing"] })}
+                    >
+                      <option value="calm">calm</option>
+                      <option value="measured">measured</option>
+                      <option value="brisk">brisk</option>
+                    </select>
+                  </label>
+                  <label className="field compact-field">
+                    <span>Theme</span>
+                    <select
+                      value={result.pitch.deckStyle?.theme || "graphite"}
+                      onChange={(event) => updateDeckStyle({ theme: event.target.value as NonNullable<PitchResponse["pitch"]["deckStyle"]>["theme"] })}
+                    >
+                      {deckThemes.map((theme) => (
+                        <option value={theme} key={theme}>
+                          {theme}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <label className="field compact-field">
+                    <span>Deck density</span>
+                    <select
+                      value={result.pitch.deckStyle?.density || "balanced"}
+                      onChange={(event) => updateDeckStyle({ density: event.target.value as NonNullable<PitchResponse["pitch"]["deckStyle"]>["density"] })}
+                    >
+                      {deckDensities.map((density) => (
+                        <option value={density} key={density}>
+                          {density}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <label className="field compact-field">
+                    <span>Demo caption</span>
+                    <select
+                      value={result.pitch.deckStyle?.captionStyle || "bar"}
+                      onChange={(event) => updateDeckStyle({ captionStyle: event.target.value as NonNullable<PitchResponse["pitch"]["deckStyle"]>["captionStyle"] })}
+                    >
+                      {captionStyles.map((style) => (
+                        <option value={style} key={style}>
+                          {style}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <label className="field compact-field">
+                    <span>Accent</span>
+                    <input type="color" value={result.pitch.deckStyle?.primaryColor || "#2563eb"} onChange={(event) => updateDeckStyle({ primaryColor: event.target.value })} />
+                  </label>
+                  <label className="toggle-field">
+                    <input
+                      type="checkbox"
+                      checked={result.pitch.deckStyle?.showGrid ?? true}
+                      onChange={(event) => updateDeckStyle({ showGrid: event.target.checked })}
+                    />
+                    <span>Grid</span>
+                  </label>
+                </div>
+              </section>
+
+              <section className="panel">
+                <div className="panel-heading">
+                  <ImagePlus size={18} />
+                  <h2>Demo footage</h2>
+                </div>
+                <div className="media-controls">
+                  <div className="button-row">
+                    <button className="btn" type="button" onClick={() => mediaInputRef.current?.click()}>
+                      <Upload size={17} />
+                      Upload footage
+                    </button>
+                    <input ref={mediaInputRef} type="file" accept="video/*,image/*" onChange={importMediaAsset} hidden />
+                  </div>
+                  <label className="field compact-field">
+                    <span>Active footage</span>
+                    <select value={result.pitch.activeMediaAssetId || ""} onChange={(event) => setActiveMediaAsset(event.target.value)}>
+                      <option value="">Captured demo footage</option>
+                      {(result.pitch.mediaAssets || []).map((asset) => (
+                        <option value={asset.id} key={asset.id}>
+                          {asset.name}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  {activeMediaAsset ? <p className="muted-copy">{activeMediaAsset.name} replaces captured demo footage in preview and export.</p> : null}
                 </div>
               </section>
 
@@ -834,6 +1076,52 @@ export function PitchWorkbench() {
                             onChange={(event) => updateScene(scene.id, { duration: Number(event.target.value) })}
                           />
                         </label>
+                        {isDemoScene(scene) ? (
+                          <>
+                            <label className="field compact-field">
+                              <span>Segment</span>
+                              <select value={scene.sourceSegmentId || ""} onChange={(event) => updateScene(scene.id, { sourceSegmentId: event.target.value || undefined })}>
+                                <option value="">Auto</option>
+                                {(result.capture?.manifest?.segments || []).map((segment) => (
+                                  <option value={segment.id} key={segment.id}>
+                                    {segment.label}
+                                  </option>
+                                ))}
+                              </select>
+                            </label>
+                            <label className="field compact-field">
+                              <span>Media</span>
+                              <select value={scene.mediaAssetId || ""} onChange={(event) => updateScene(scene.id, { mediaAssetId: event.target.value || undefined })}>
+                                <option value="">Active/default</option>
+                                {(result.pitch.mediaAssets || []).map((asset) => (
+                                  <option value={asset.id} key={asset.id}>
+                                    {asset.name}
+                                  </option>
+                                ))}
+                              </select>
+                            </label>
+                            <label className="field compact-field">
+                              <span>Trim start</span>
+                              <input
+                                type="number"
+                                min="0"
+                                step="0.1"
+                                value={scene.trimStart ?? ""}
+                                onChange={(event) => updateScene(scene.id, { trimStart: event.target.value === "" ? undefined : Number(event.target.value) })}
+                              />
+                            </label>
+                            <label className="field compact-field">
+                              <span>Trim end</span>
+                              <input
+                                type="number"
+                                min="0"
+                                step="0.1"
+                                value={scene.trimEnd ?? ""}
+                                onChange={(event) => updateScene(scene.id, { trimEnd: event.target.value === "" ? undefined : Number(event.target.value) })}
+                              />
+                            </label>
+                          </>
+                        ) : null}
                         <label className="field compact-field wide">
                           <span>On-screen text</span>
                           <input value={scene.onScreenText} onChange={(event) => updateScene(scene.id, { onScreenText: event.target.value })} />
@@ -871,8 +1159,37 @@ function normalizePitchResult(result: PitchResponse): PitchResponse {
   return {
     ...result,
     capture: ensureCaptureManifest(result.capture),
-    pitch: normalizePitchTimeline(result.pitch),
+    pitch: normalizePitchSettings(normalizePitchTimeline(result.pitch)),
   };
+}
+
+function getActiveMediaAsset(result: PitchResponse | null, currentTime: number) {
+  if (!result?.pitch.mediaAssets?.length) return undefined;
+  const scene = getSceneAtTime(result.pitch, currentTime);
+  const sceneAsset = scene.mediaAssetId
+    ? getMediaAssetById(result.pitch.mediaAssets, scene.mediaAssetId)
+    : undefined;
+  return sceneAsset || getMediaAssetById(result.pitch.mediaAssets, result.pitch.activeMediaAssetId);
+}
+
+function getMediaAssetById(assets: ProjectMediaAsset[] | undefined, assetId?: string) {
+  return assetId ? assets?.find((asset) => asset.id === assetId) : undefined;
+}
+
+function shouldScenePatchInvalidateAudio(patch: Partial<PitchScene>) {
+  return Boolean(patch.title !== undefined || patch.beat !== undefined || patch.narration !== undefined || patch.onScreenText !== undefined || patch.duration !== undefined);
+}
+
+async function readFileAsDataUrl(file: File) {
+  return new Promise<string>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      if (typeof reader.result === "string") resolve(reader.result);
+      else reject(new Error("Could not read uploaded media."));
+    };
+    reader.onerror = () => reject(new Error("Could not read uploaded media."));
+    reader.readAsDataURL(file);
+  });
 }
 
 function CaptureManifestPanel({ manifest }: { manifest: DemoCaptureManifest }) {
@@ -1050,8 +1367,11 @@ async function loadCaptureImage(url?: string) {
   }
 }
 
-async function loadCaptureMedia(capture?: DemoCaptureResult) {
-  if (capture?.videoUrl) {
+async function loadCaptureMedia(capture?: DemoCaptureResult, mediaAsset?: ProjectMediaAsset) {
+  const videoUrl = mediaAsset?.type === "video" ? mediaAsset.dataUrl : capture?.videoUrl;
+  const imageUrl = mediaAsset?.type === "image" ? mediaAsset.dataUrl : capture?.screenshotUrl;
+
+  if (videoUrl) {
     try {
       const video = document.createElement("video");
       video.crossOrigin = "anonymous";
@@ -1062,16 +1382,30 @@ async function loadCaptureMedia(capture?: DemoCaptureResult) {
       await new Promise<void>((resolve, reject) => {
         video.onloadeddata = () => resolve();
         video.onerror = () => reject(new Error("Could not load capture video."));
-        video.src = capture.videoUrl || "";
+        video.src = videoUrl;
       });
       await seekCaptureVideoFrame(video, 0.05);
       return video;
     } catch {
-      return loadCaptureImage(capture.screenshotUrl);
+      return loadCaptureImage(imageUrl);
     }
   }
 
-  return loadCaptureImage(capture?.screenshotUrl);
+  return loadCaptureImage(imageUrl);
+}
+
+async function loadExportMediaSet(capture: DemoCaptureResult | undefined, pitch: PitchResponse["pitch"]): Promise<ExportMediaSet> {
+  const defaultMedia = await loadCaptureMedia(capture);
+  const assets = new Map<string, LoadedMedia>();
+
+  await Promise.all(
+    (pitch.mediaAssets || []).map(async (asset) => {
+      const media = await loadCaptureMedia(capture, asset);
+      if (media) assets.set(asset.id, media);
+    }),
+  );
+
+  return { defaultMedia, assets };
 }
 
 async function seekCaptureVideoFrame(video: HTMLVideoElement, time: number) {
@@ -1098,61 +1432,87 @@ async function drawExportFrames(
   context: CanvasRenderingContext2D,
   result: PitchResponse,
   duration: number,
-  captureMedia?: CanvasImageSource,
+  exportMedia: ExportMediaSet,
 ) {
-  const captureVideo = captureMedia instanceof HTMLVideoElement ? captureMedia : undefined;
-  if (captureVideo) {
-    captureVideo.currentTime = 0;
-    captureVideo.pause();
-  }
+  pauseInactiveExportVideos(exportMedia);
   const startedAt = performance.now();
-  const playbackState = { active: false };
+  const playbackStates = new Map<string, { active: boolean; lastTime: number; sceneId?: string }>();
   await new Promise<void>((resolve) => {
     const draw = (now: number) => {
       const elapsed = Math.min(duration, (now - startedAt) / 1000);
-      if (captureVideo) syncExportVideo(captureVideo, result.pitch, elapsed, playbackState);
-      drawPitchFrame(context, result.pitch, elapsed, captureMedia);
+      const selection = selectExportMedia(result, elapsed, exportMedia);
+      const captureVideo = selection.media instanceof HTMLVideoElement ? selection.media : undefined;
+      pauseInactiveExportVideos(exportMedia, selection.key);
+      if (captureVideo) {
+        const state = playbackStates.get(selection.key) || { active: false, lastTime: 0 };
+        syncExportVideo(captureVideo, result.pitch, elapsed, state);
+        playbackStates.set(selection.key, state);
+      }
+      drawPitchFrame(context, result.pitch, elapsed, drawableExportMedia(selection.media));
       if (elapsed >= duration) resolve();
       else requestAnimationFrame(draw);
     };
     requestAnimationFrame(draw);
   });
-  captureVideo?.pause();
+  pauseInactiveExportVideos(exportMedia);
+}
+
+function selectExportMedia(result: PitchResponse, currentTime: number, exportMedia: ExportMediaSet): ExportMediaSelection {
+  const scene = getSceneAtTime(result.pitch, currentTime);
+  if (scene.mediaAssetId) {
+    const media = exportMedia.assets.get(scene.mediaAssetId);
+    if (media) return { key: `asset:${scene.mediaAssetId}`, media };
+  }
+
+  if (result.pitch.activeMediaAssetId) {
+    const media = exportMedia.assets.get(result.pitch.activeMediaAssetId);
+    if (media) return { key: `asset:${result.pitch.activeMediaAssetId}`, media };
+  }
+
+  return { key: "default", media: exportMedia.defaultMedia };
+}
+
+function pauseInactiveExportVideos(exportMedia: ExportMediaSet, activeKey?: string) {
+  if (exportMedia.defaultMedia instanceof HTMLVideoElement && activeKey !== "default") exportMedia.defaultMedia.pause();
+  for (const [assetId, media] of exportMedia.assets) {
+    if (media instanceof HTMLVideoElement && activeKey !== `asset:${assetId}`) media.pause();
+  }
+}
+
+function drawableExportMedia(media: LoadedMedia | undefined) {
+  if (!(media instanceof HTMLVideoElement)) return media;
+  return media.videoWidth > 0 && media.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA ? media : undefined;
 }
 
 function syncExportVideo(
   video: HTMLVideoElement,
   plan: PitchResponse["pitch"],
   currentTime: number,
-  playbackState: { active: boolean },
+  playbackState: { active: boolean; lastTime: number; sceneId?: string },
 ) {
   const scene = getSceneAtTime(plan, currentTime);
   if (!isDemoScene(scene)) {
     video.pause();
     playbackState.active = false;
-    if (currentTime < firstDemoStart(plan) && Number.isFinite(video.duration) && video.duration > 0 && video.currentTime > 0.1) video.currentTime = 0;
+    playbackState.sceneId = undefined;
+    playbackState.lastTime = currentTime;
+    if (Number.isFinite(video.duration) && video.duration > 0 && video.currentTime > 0.1) video.currentTime = 0;
     return;
   }
 
   if (Number.isFinite(video.duration) && video.duration > 0) {
-    const demoDuration = Math.max(1, lastDemoEnd(plan) - firstDemoStart(plan));
-    video.playbackRate = Math.max(0.1, Math.min(1, video.duration / demoDuration));
-    if (!playbackState.active) {
-      video.currentTime = getDemoPlaybackTime(plan, currentTime, video.duration);
+    const trimStart = Math.min(Math.max(0, scene.trimStart ?? 0), Math.max(0, video.duration - 0.05));
+    const trimEnd = scene.trimEnd !== undefined && scene.trimEnd > trimStart ? Math.min(scene.trimEnd, video.duration) : video.duration;
+    const mediaSpan = Math.max(1, trimEnd - trimStart);
+    video.playbackRate = Math.max(0.1, Math.min(2, mediaSpan / Math.max(1, scene.duration)));
+    if (!playbackState.active || playbackState.sceneId !== scene.id || currentTime < playbackState.lastTime) {
+      video.currentTime = getSceneMediaPlaybackTime(plan, currentTime, video.duration);
       playbackState.active = true;
+      playbackState.sceneId = scene.id;
     }
   }
+  playbackState.lastTime = currentTime;
   void video.play().catch(() => undefined);
-}
-
-function firstDemoStart(plan: PitchResponse["pitch"]) {
-  return plan.scenes.find(isDemoScene)?.start ?? 0;
-}
-
-function lastDemoEnd(plan: PitchResponse["pitch"]) {
-  const demoScenes = plan.scenes.filter(isDemoScene);
-  const last = demoScenes.at(-1);
-  return last ? last.start + last.duration : firstDemoStart(plan) + 1;
 }
 
 function pickRecordingMimeType() {

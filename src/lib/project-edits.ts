@@ -1,6 +1,11 @@
 import type { PitchPlan, PitchScene, VisualMode } from "@/lib/types";
 
-export type EditableScenePatch = Partial<Pick<PitchScene, "title" | "beat" | "narration" | "onScreenText" | "visual" | "duration">>;
+export type EditableScenePatch = Partial<
+  Pick<
+    PitchScene,
+    "title" | "beat" | "narration" | "onScreenText" | "visual" | "duration" | "sourceSegmentId" | "mediaAssetId" | "trimStart" | "trimEnd"
+  >
+>;
 
 export type ProjectEditOperation =
   | {
@@ -12,6 +17,10 @@ export type ProjectEditOperation =
       type: "move-scene";
       sceneId: string;
       toIndex: number;
+    }
+  | {
+      type: "scale-duration";
+      targetDuration: number;
     };
 
 const visualModes: VisualMode[] = ["presenter", "problem", "product", "workflow", "evidence", "close"];
@@ -33,6 +42,10 @@ export function applyProjectEditOperation(plan: PitchPlan, operation: ProjectEdi
     return normalizePitchTimeline({ ...plan, scenes });
   }
 
+  if (operation.type === "scale-duration") {
+    return normalizePitchTimeline(scalePitchDuration(plan, operation.targetDuration));
+  }
+
   return plan;
 }
 
@@ -49,6 +62,8 @@ export function normalizePitchTimeline(plan: PitchPlan): PitchPlan {
       narration: scene.narration || "",
       onScreenText: scene.onScreenText || scene.title || `Scene ${index + 1}`,
       visual,
+      trimStart: normalizeOptionalTime(scene.trimStart),
+      trimEnd: normalizeOptionalTime(scene.trimEnd),
       duration,
       start,
     };
@@ -64,10 +79,36 @@ export function normalizePitchTimeline(plan: PitchPlan): PitchPlan {
 }
 
 function normalizeScenePatch(scene: PitchScene, patch: EditableScenePatch): PitchScene {
+  const trimStart = patch.trimStart === undefined ? scene.trimStart : normalizeOptionalTime(patch.trimStart);
+  const trimEnd = patch.trimEnd === undefined ? scene.trimEnd : normalizeOptionalTime(patch.trimEnd);
   return {
     ...scene,
     ...patch,
     visual: patch.visual && visualModes.includes(patch.visual) ? patch.visual : scene.visual,
     duration: patch.duration === undefined ? scene.duration : Math.max(1, Number(patch.duration) || 1),
+    trimStart,
+    trimEnd: trimEnd !== undefined && trimStart !== undefined && trimEnd <= trimStart ? undefined : trimEnd,
   };
+}
+
+function scalePitchDuration(plan: PitchPlan, targetDuration: number): PitchPlan {
+  const target = Math.max(5, Math.min(180, Number(targetDuration) || 5));
+  const current = plan.scenes.reduce((total, scene) => total + Math.max(1, Number(scene.duration) || 1), 0);
+  if (!current) return plan;
+  const scale = target / current;
+  return {
+    ...plan,
+    targetDuration: target,
+    scenes: plan.scenes.map((scene) => ({
+      ...scene,
+      duration: Math.max(1, Number((Math.max(1, Number(scene.duration) || 1) * scale).toFixed(1))),
+    })),
+  };
+}
+
+function normalizeOptionalTime(value: unknown) {
+  if (value === undefined || value === null || value === "") return undefined;
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric) || numeric < 0) return undefined;
+  return Number(numeric.toFixed(2));
 }

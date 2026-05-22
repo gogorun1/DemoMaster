@@ -1,4 +1,30 @@
 export type VisualMode = "presenter" | "problem" | "product" | "workflow" | "evidence" | "close";
+export type DeckTheme = "graphite" | "studio" | "paper" | "midnight";
+export type DeckDensity = "compact" | "balanced" | "bold";
+export type DemoCaptionStyle = "bar" | "pill" | "none";
+
+export interface VoiceSettings {
+  voiceName: string;
+  tone: "clear" | "warm" | "energetic" | "executive";
+  pacing: "calm" | "measured" | "brisk";
+}
+
+export interface DeckStyle {
+  theme: DeckTheme;
+  density: DeckDensity;
+  captionStyle: DemoCaptionStyle;
+  primaryColor: string;
+  showGrid: boolean;
+}
+
+export interface ProjectMediaAsset {
+  id: string;
+  type: "video" | "image";
+  name: string;
+  mimeType: string;
+  dataUrl: string;
+  createdAt: string;
+}
 
 export interface PitchRequest {
   repoUrl: string;
@@ -134,6 +160,10 @@ export interface PitchScene {
   visual: VisualMode;
   duration: number;
   start: number;
+  sourceSegmentId?: string;
+  mediaAssetId?: string;
+  trimStart?: number;
+  trimEnd?: number;
 }
 
 export interface PitchPlan {
@@ -152,6 +182,11 @@ export interface PitchPlan {
   productReport: ProductReport;
   partnerStack: PartnerCapability[];
   capturePlan: DemoCapturePlan;
+  targetDuration?: number;
+  voiceSettings?: VoiceSettings;
+  deckStyle?: DeckStyle;
+  mediaAssets?: ProjectMediaAsset[];
+  activeMediaAssetId?: string;
   generatedAt: string;
 }
 
